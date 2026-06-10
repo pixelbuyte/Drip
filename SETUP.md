@@ -1,4 +1,39 @@
-# Drip Setup Guide — Step 1: Supabase Schema + RLS + Auth
+# Drip Setup Guide
+
+# Step 2: Stripe Connect Express Onboarding
+
+## What's Been Built
+
+- **`POST /api/stripe/onboarding/start`** — creates the seller's Express account (US, individual, card_payments + transfers, `debit_negative_balances: true` so Stripe can recover refund/dispute shortfalls from the seller's bank) and returns a hosted Account Link URL
+- **`GET /api/stripe/onboarding/refresh`** — Stripe redirects here when an Account Link expires; mints a fresh link and bounces the seller back into onboarding
+- **`GET /api/stripe/onboarding/status`** — fetches live account state from Stripe, syncs `charges_enabled` to the profile, and returns outstanding `requirements` + `disabled_reason`
+- **`POST /api/webhooks/stripe`** — signature-verified, idempotent webhook handler; `account.updated` keeps `charges_enabled` in sync (`checkout.session.completed` stubbed for Step 5)
+- **`/onboarding/stripe/return`** — post-onboarding landing page; shows 🎉 + redirect to dashboard when verified, or a human-readable list of missing requirements with a "Continue Stripe Setup" button
+- **Idempotency table** — `processed_events` (migration `00002`), UNIQUE on `(provider, event_id)`; duplicate webhook deliveries are acknowledged without reprocessing, and failed handlers release their claim so Stripe retries work
+- **Fee plumbing** — `APPLICATION_FEE_BPS = 0` in `src/lib/stripe.ts`; flip to `800` later without touching checkout code
+
+## Setup for Step 2
+
+1. Run migration `supabase/migrations/00002_webhook_events.sql` in the Supabase SQL Editor
+2. Get your Stripe **test mode** secret key → `STRIPE_SECRET_KEY` in `.env.local`
+3. Forward webhooks locally: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → copy the `whsec_...` into `STRIPE_WEBHOOK_SECRET`
+4. Make sure `NEXT_PUBLIC_APP_URL=http://localhost:3000` is set (Account Links need absolute URLs)
+
+## What to Test Before Step 3
+
+- [ ] From `/onboarding/stripe`, click "Start Stripe Onboarding" → redirected to Stripe-hosted Express onboarding
+- [ ] Complete onboarding with Stripe test data (SSN `000-00-0000`, any future DOB over 18, test bank `110000000` / `000123456789`)
+- [ ] Land on `/onboarding/stripe/return` → see "You're ready to sell!" → auto-redirect to dashboard
+- [ ] Check Supabase: profile row has `stripe_account_id` set and `charges_enabled = true`
+- [ ] Abandon onboarding halfway, return → requirements list shows what's missing, "Continue Stripe Setup" resumes
+- [ ] In Stripe Dashboard → Connect → the Express account exists with `debit_negative_balances` on
+- [ ] Trigger `stripe trigger account.updated` → webhook returns 200, row appears in `processed_events`
+- [ ] Replay the same event (`stripe events resend <id>`) → returns `duplicate: true`, no double-processing
+- [ ] Visit `/dashboard` with `charges_enabled = false` → bounced to `/onboarding/stripe` (listing creation stays blocked)
+
+---
+
+# Step 1: Supabase Schema + RLS + Auth
 
 ## What's Been Built
 

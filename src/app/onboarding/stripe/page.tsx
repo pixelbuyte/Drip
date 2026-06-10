@@ -1,31 +1,65 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function StripeOnboardingPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Already verified? Skip straight to the dashboard.
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/stripe/onboarding/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.charges_enabled) {
+            router.push('/dashboard');
+            return;
+          }
+        }
+      } catch {
+        // Fall through to the onboarding CTA.
+      }
+      setIsChecking(false);
+    };
+
+    checkStatus();
+  }, [router]);
 
   const handleStartOnboarding = async () => {
     setIsLoading(true);
+    setError(null);
     try {
-      // Step 2 will implement the Stripe Connect flow
       const response = await fetch('/api/stripe/onboarding/start', {
         method: 'POST',
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to start onboarding');
+        throw new Error(data.error || 'Failed to start onboarding');
       }
 
-      const data = await response.json();
       if (data.url) {
         window.location.href = data.url;
       }
     } catch (err) {
-      console.error('Onboarding error:', err);
+      setError(err instanceof Error ? err.message : 'Something went wrong');
       setIsLoading(false);
     }
   };
+
+  if (isChecking) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <p className="text-gray-600">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
@@ -37,6 +71,12 @@ export default function StripeOnboardingPage() {
             few minutes.
           </p>
         </div>
+
+        {error && (
+          <div className="rounded-md bg-red-50 p-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
 
         <button
           onClick={handleStartOnboarding}
