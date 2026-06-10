@@ -73,6 +73,27 @@ export default function DropsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const restock = async (drop: Drop) => {
+    const answer = window.prompt(`New inventory for "${drop.title}"?`, '10');
+    if (!answer) return;
+    const inventory = parseInt(answer, 10);
+    if (!Number.isFinite(inventory) || inventory < 1) return;
+
+    const res = await fetch(`/api/drops/${drop.id}/restock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inventory }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setDrops((ds) => ds.map((d) => (d.id === drop.id ? { ...d, inventory } : d)));
+      if (data.waitlist_notified > 0) {
+        window.alert(`Restocked! ${data.waitlist_notified} waitlisted buyer(s) notified.`);
+      }
+    }
+  };
+
   if (isLoading) {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>;
   }
@@ -133,6 +154,14 @@ export default function DropsPage() {
                       >
                         {copiedId === drop.id ? 'Copied!' : 'Copy link'}
                       </button>
+                      {drop.inventory === 0 && (
+                        <button
+                          onClick={() => restock(drop)}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                        >
+                          Restock
+                        </button>
+                      )}
                     </>
                   )}
                   {drop.status === 'rejected' && (

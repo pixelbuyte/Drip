@@ -1,5 +1,38 @@
 # Drip Setup Guide
 
+# Step 6: Shipping Labels + Emails + Tracking
+
+## What's Been Built
+
+- **Auto label purchase** — after order creation, the webhook buys the cheapest USPS rate via EasyPost (PDF format) using buyer address + seller from-address + package weight/dims, then sets `easypost_shipment_id`, `tracking_code`, `label_url`, status → `label_created`. Label purchase is **best-effort**: a failure logs and leaves the order `paid` (the Step 7 dashboard gets a retry button) — it never re-triggers inventory work
+- **Emails (Resend, all best-effort, never block fulfillment):**
+  - Seller: "🎉 New sale" with the label PDF link + inline packing slip (order ID, item w/ variant, total, ship-to)
+  - Buyer: order confirmation with tracking number (or "tracking soon" if the label failed)
+  - Buyer: "Delivered 📦" when the tracker hits delivered
+  - Waitlist: "Back in stock 🔥" with a buy link
+- **EasyPost tracking webhook** (`/api/webhooks/easypost`) — verifies the `X-Hmac-Signature` HMAC, idempotent via `processed_events`; `tracker.updated` maps `in_transit`/`out_for_delivery` → `shipped` and `delivered` → `delivered` + buyer email
+- **Restock + waitlist blast** — `POST /api/drops/[id]/restock` (Restock button on sold-out drops): sets new inventory, and on a 0→N transition emails all un-notified waitlist entries. Entries are marked `notified_at` *before* sending so a crash mid-blast can't double-email
+- New env vars: `EASYPOST_WEBHOOK_SECRET` (signature verification is a hard rule), `RESEND_FROM_EMAIL` (optional; defaults to Resend's test sender)
+
+## Setup for Step 6
+
+1. EasyPost dashboard → Webhooks → add `https://<tunnel>/api/webhooks/easypost`, copy the webhook secret → `EASYPOST_WEBHOOK_SECRET`
+2. Resend → create API key → `RESEND_API_KEY`; verify a sending domain and set `RESEND_FROM_EMAIL` (or skip and use the test sender, which only delivers to your own account email)
+3. Use EasyPost **test mode** keys — test labels are free and USPS test tracking codes simulate transitions
+
+## What to Test Before Step 7
+
+- [ ] Complete a purchase → order goes `paid` → `label_created` within seconds; `tracking_code` + `label_url` populated
+- [ ] Seller email arrives with working label PDF link + packing slip
+- [ ] Buyer email arrives with tracking number
+- [ ] With `EASYPOST_API_KEY` removed: order stays `paid`, both emails still send (buyer gets "tracking soon"), webhook still returns 200
+- [ ] Simulate tracker updates (EasyPost test trackers): `in_transit` → order `shipped`; `delivered` → order `delivered` + buyer delivered email
+- [ ] Replay an EasyPost event → `duplicate: true`
+- [ ] EasyPost webhook with a bad signature → 400
+- [ ] Sell out a drop, join its waitlist, hit Restock (set 10) → inventory updates, waitlist email sent, `notified_at` set; restocking again does NOT re-email
+
+---
+
 # Step 5: Order Creation + Atomic Inventory + Waitlist
 
 ## What's Been Built
