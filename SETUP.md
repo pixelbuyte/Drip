@@ -1,5 +1,46 @@
 # Drip Setup Guide
 
+# Step 4: Public Drop Page + Stripe Checkout (the money page)
+
+## What's Been Built
+
+- **`/@handle/drop-slug`** — mobile-first public drop page: full-bleed vertical video (Mux Player: autoplay muted, loop, plays inline, object-cover), tap-to-unmute, seller badge, price, "Only N left" when ≤5, variant pickers (44px+ tap targets), collapsible discount-code field, buy button, sold-out state, "Powered by Drip" footer
+- **OG tags** — `generateMetadata` emits og:title (`Title — $price`), og:description, og:image (Mux thumbnail at 1200×630 smartcrop, absolute HTTPS URL), og:url + Twitter `summary_large_image` so links preview well in bios/DMs
+- **`POST /api/checkout`** — re-validates everything server-side (drop active, inventory > 0, variant selection legal, seller `charges_enabled`), then creates a Stripe Checkout Session:
+  - **Destination charge** to the seller's connected account, `application_fee_amount` plumbed (= 0)
+  - **US-only**: `shipping_address_collection.allowed_countries = ['US']`
+  - Shipping as a separate line item, priced via **EasyPost flat-rate estimate** (rates seller's package to the far coast, cheapest USPS rate + 10% buffer; weight-based fallback table if EasyPost is down)
+  - **Per-seller discount validation** — code looked up against this seller only, applied via session `discounts` (never `allow_promotion_codes`)
+  - Variant selection + shipping cents + discount code stored in session metadata for Step 5's order creation
+  - Sessions expire after 30 min to limit open carts against finite inventory
+  - Apple Pay / Google Pay are on automatically in hosted Checkout (enable them in Stripe Dashboard → Payment Methods)
+- **`/@handle/drop-slug/thanks`** — order confirmation landing page
+
+## Setup for Step 4
+
+1. Set `EASYPOST_API_KEY` (test key) in `.env.local` — optional; the fallback rate table kicks in without it
+2. Stripe Dashboard → Settings → Payment Methods → confirm Apple Pay + Google Pay enabled
+3. Use a tunnel (ngrok) if testing wallet buttons — Apple Pay requires HTTPS
+
+## What to Test Before Step 5
+
+- [ ] Open `/@yourhandle/your-slug` on a phone (or devtools mobile emulation) → video autoplays muted, fills the screen, loops
+- [ ] Tap 🔇 → audio unmutes
+- [ ] Paste the link into a link-preview debugger (e.g. opengraph.xyz) → title, price, and video thumbnail render
+- [ ] With variants: tapping Buy without selecting → "Please select a Size"; after selecting → Stripe Checkout opens with "Title (M / Black)"
+- [ ] Checkout shows item + "Shipping (USPS)" line; shipping price looks sane for the package weight
+- [ ] Address form only accepts US addresses
+- [ ] Enter discount code `SAVE10` → Checkout shows the discount applied; a bogus code → "Invalid discount code" on the drop page
+- [ ] Another seller's code on your drop → rejected
+- [ ] Pay with test card `4242 4242 4242 4242` → land on `/thanks` page
+- [ ] Set inventory to 0 in Supabase → page shows Sold Out; `POST /api/checkout` returns 409
+- [ ] Set inventory to 3 → "Only 3 left" appears
+- [ ] Drop with status `processing` or `archived` → public page 404s
+
+> Note: paying does NOT yet decrement inventory or create an order — that's Step 5 (the `checkout.session.completed` webhook).
+
+---
+
 # Step 3: Mux Upload + Drop Creation (+ Variants, Discounts, From-Address)
 
 ## What's Been Built
