@@ -1,5 +1,34 @@
 # Drip Setup Guide
 
+# Step 7: Seller Dashboard
+
+## What's Been Built
+
+- **Dashboard home** — revenue / sales / pending-payout stat cards (payout read live from the seller's connected-account Stripe balance), nav to Orders
+- **`/dashboard/orders`** — orders list: item, buyer, total, date, status chain badges (Paid — needs label → Label created → Shipped → Delivered, plus Refunded), USPS tracking link, **Print label** button, and a **Buy label** retry button for orders stuck in `paid` (e.g. EasyPost was down during the webhook)
+- **CSV export** (`GET /api/orders/export`) — full order history with ship-to address, totals, status, tracking; opens as a download
+- **Per-drop analytics** on `/dashboard/drops` — views (Mux Data, last 90 days), sales count, revenue under each drop
+- **`GET /api/dashboard/stats`** — aggregates orders (refunds excluded), fetches Mux view counts per asset (best-effort, zeros on failure), reads pending/available USD balance via `stripe.balance.retrieve({ stripeAccount })`
+- **Fulfillment refactor** — label+email logic extracted to `src/lib/fulfillment.ts`, shared by the checkout webhook and the retry endpoint; retry skips the buyer confirmation (already sent) and only buys the label + emails the seller
+
+## Setup for Step 7
+
+Nothing new — uses existing Stripe/Mux/EasyPost keys. (Mux view counts require Mux Data, which is on by default when using Mux Player.)
+
+## What to Test (Final Step Before Polish)
+
+- [ ] Dashboard shows revenue/sales matching your test orders; pending payout matches Stripe Dashboard → Connect → account balance
+- [ ] Orders page lists orders newest-first with correct status badges
+- [ ] Print label opens the PDF; tracking link opens USPS tracking
+- [ ] Force a failed label (remove `EASYPOST_API_KEY`, buy something, restore key) → order shows "Buy label" → click → label purchased, status flips, seller email arrives, NO duplicate buyer confirmation
+- [ ] Retry on an order that already has a label → 409
+- [ ] Another seller's order ID in the retry URL → 404 (RLS)
+- [ ] Export CSV → opens in a spreadsheet with correct columns; commas/quotes in addresses don't break rows
+- [ ] Drops page shows views/sales/revenue per drop (views may lag — Mux Data takes a few minutes)
+- [ ] Stats endpoint unauthenticated → 401
+
+---
+
 # Step 6: Shipping Labels + Emails + Tracking
 
 ## What's Been Built

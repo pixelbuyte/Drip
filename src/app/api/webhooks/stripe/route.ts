@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { buyLabel } from '@/lib/easypost';
-import { sendSellerLabelEmail, sendBuyerConfirmation } from '@/lib/emails';
+import { fulfillOrder } from '@/lib/fulfillment';
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -96,122 +95,7 @@ async function handleCheckoutCompleted(
   // Label purchase + emails are best-effort: the order exists and the event
   // claim stands, so a failure here must not re-trigger inventory work.
   // Orders left in 'paid' get a retry button in the seller dashboard.
-  await fulfillOrder(supabase, order.id, dropId, sellerId, {
-    buyerEmail: session.customer_details?.email ?? '',
-    buyerName: shipping?.name ?? session.customer_details?.name ?? '',
-    shippingAddress,
-    amountCents: session.amount_total ?? 0,
-    shippingCents,
-    variantSelection: session.metadata?.drip_variant_selection ?? null,
-  });
-}
-
-type FulfillmentInfo = {
-  buyerEmail: string;
-  buyerName: string;
-  shippingAddress: {
-    name: string | null;
-    street1: string | null;
-    street2: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    country: string | null;
-  } | null;
-  amountCents: number;
-  shippingCents: number;
-  variantSelection: string | null;
-};
-
-// Buys the shipping label and sends seller + buyer emails. Never throws.
-async function fulfillOrder(
-  supabase: AdminClient,
-  orderId: string,
-  dropId: string,
-  sellerId: string,
-  info: FulfillmentInfo
-) {
-  try {
-    const [{ data: drop }, { data: seller }, { data: sellerUser }] = await Promise.all([
-      supabase
-        .from('drops')
-        .select('title, weight_oz, dimensions, slug')
-        .eq('id', dropId)
-        .single(),
-      supabase
-        .from('profiles')
-        .select('handle, display_name, from_address')
-        .eq('id', sellerId)
-        .single(),
-      supabase.auth.admin.getUserById(sellerId),
-    ]);
-
-    if (!drop || !seller?.from_address) {
-      console.error(`Order ${orderId}: missing drop or seller from_address; skipping label`);
-      return;
-    }
-
-    let variantLabel: string | null = null;
-    try {
-      const selection = info.variantSelection ? JSON.parse(info.variantSelection) : null;
-      if (selection && typeof selection === 'object') {
-        variantLabel = Object.values(selection).join(' / ') || null;
-      }
-    } catch {
-      // Malformed metadata; skip the label suffix.
-    }
-
-    const emailData = {
-      orderId,
-      dropTitle: drop.title,
-      variantLabel,
-      amountCents: info.amountCents,
-      shippingCents: info.shippingCents,
-      buyerName: info.buyerName,
-      buyerEmail: info.buyerEmail,
-      shippingAddress: info.shippingAddress,
-      sellerDisplayName: seller.display_name,
-      sellerHandle: seller.handle,
-    };
-
-    let label = null;
-    if (info.shippingAddress) {
-      try {
-        label = await buyLabel(seller.from_address, info.shippingAddress, {
-          length_in: drop.dimensions?.length_in ?? 6,
-          width_in: drop.dimensions?.width_in ?? 6,
-          height_in: drop.dimensions?.height_in ?? 4,
-          weight_oz: Number(drop.weight_oz) || 8,
-        });
-
-        await supabase
-          .from('orders')
-          .update({
-            easypost_shipment_id: label.shipment_id,
-            tracking_code: label.tracking_code,
-            label_url: label.label_url,
-            status: 'label_created',
-          })
-          .eq('id', orderId);
-      } catch (labelErr) {
-        console.error(`Label purchase failed for order ${orderId}:`, labelErr);
-      }
-    }
-
-    const sellerEmail = sellerUser?.user?.email;
-    if (sellerEmail && label) {
-      await sendSellerLabelEmail(sellerEmail, emailData, label);
-    }
-
-    if (info.buyerEmail) {
-      await sendBuyerConfirmation(
-        emailData,
-        label ? { tracking_code: label.tracking_code, carrier: label.carrier } : null
-      );
-    }
-  } catch (err) {
-    console.error(`Fulfillment failed for order ${orderId}:`, err);
-  }
+  await fulfillOrder(supabase, order.id, { sendBuyerEmail: true });
 }
 
 export async function POST(request: NextRequest) {

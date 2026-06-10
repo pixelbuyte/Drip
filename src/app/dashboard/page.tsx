@@ -10,6 +10,12 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [profile, setProfile] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<{
+    total_revenue_cents: number;
+    total_sales: number;
+    pending_payout_cents: number;
+    available_payout_cents: number;
+  } | null>(null);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -36,7 +42,14 @@ export default function DashboardPage() {
         // Check if Stripe onboarding is complete
         if (!data.charges_enabled) {
           router.push('/onboarding/stripe');
+          return;
         }
+
+        // Revenue/payout stats are non-blocking.
+        fetch('/api/dashboard/stats')
+          .then((res) => (res.ok ? res.json() : null))
+          .then((s) => s && setStats(s))
+          .catch(() => {});
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
@@ -89,6 +102,34 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {/* Revenue / payout stats */}
+        <div className="mt-8 grid grid-cols-3 gap-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-4 text-center">
+            <div className="text-2xl font-bold text-gray-900">
+              {stats ? `$${(stats.total_revenue_cents / 100).toFixed(2)}` : '—'}
+            </div>
+            <div className="mt-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+              Revenue
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4 text-center">
+            <div className="text-2xl font-bold text-gray-900">
+              {stats ? stats.total_sales : '—'}
+            </div>
+            <div className="mt-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+              Sales
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4 text-center">
+            <div className="text-2xl font-bold text-gray-900">
+              {stats ? `$${(stats.pending_payout_cents / 100).toFixed(2)}` : '—'}
+            </div>
+            <div className="mt-1 text-xs font-medium uppercase tracking-wide text-gray-500">
+              Pending payout
+            </div>
+          </div>
+        </div>
+
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           <a
             href="/dashboard/drops"
@@ -98,10 +139,13 @@ export default function DashboardPage() {
             <p className="mt-2 text-gray-600">Create and manage your video listings</p>
           </a>
 
-          <div className="rounded-lg border border-gray-200 bg-white p-6">
+          <a
+            href="/dashboard/orders"
+            className="rounded-lg border border-gray-200 bg-white p-6 hover:border-blue-300 hover:shadow-sm"
+          >
             <h2 className="text-lg font-semibold text-gray-900">Orders</h2>
-            <p className="mt-2 text-gray-600">Coming in Step 5: view your sales and orders</p>
-          </div>
+            <p className="mt-2 text-gray-600">Sales, labels, tracking, CSV export</p>
+          </a>
 
           <a
             href="/dashboard/discounts"

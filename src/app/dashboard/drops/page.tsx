@@ -35,6 +35,9 @@ export default function DropsPage() {
   const [handle, setHandle] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [perDrop, setPerDrop] = useState<
+    Record<string, { views: number; sales: number; revenue_cents: number }>
+  >({});
 
   useEffect(() => {
     const load = async () => {
@@ -59,6 +62,12 @@ export default function DropsPage() {
       setHandle(profile?.handle ?? '');
       setDrops(dropRows ?? []);
       setIsLoading(false);
+
+      // Views/sales/revenue load after the list renders.
+      fetch('/api/dashboard/stats')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((s) => s?.per_drop && setPerDrop(s.per_drop))
+        .catch(() => {});
     };
 
     load();
@@ -135,6 +144,12 @@ export default function DropsPage() {
                     ${(drop.price_cents / 100).toFixed(2)} ·{' '}
                     {drop.inventory === 0 ? 'Sold out' : `${drop.inventory} in stock`}
                   </p>
+                  {perDrop[drop.id] && (
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      {perDrop[drop.id].views} views · {perDrop[drop.id].sales} sales · $
+                      {(perDrop[drop.id].revenue_cents / 100).toFixed(2)} revenue
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex gap-2">
