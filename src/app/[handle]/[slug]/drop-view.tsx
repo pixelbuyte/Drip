@@ -25,6 +25,8 @@ export default function DropView({ drop, seller }: Props) {
   const [showCode, setShowCode] = useState(false);
   const [isBuying, setIsBuying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waitlistEmail, setWaitlistEmail] = useState('');
+  const [waitlistState, setWaitlistState] = useState<'idle' | 'saving' | 'joined'>('idle');
 
   const soldOut = drop.inventory <= 0;
   const lowStock = !soldOut && drop.inventory <= 5;
@@ -59,6 +61,25 @@ export default function DropView({ drop, seller }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setIsBuying(false);
+    }
+  };
+
+  const handleJoinWaitlist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setWaitlistState('saving');
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ drop_id: drop.id, email: waitlistEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not join the waitlist');
+      setWaitlistState('joined');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setWaitlistState('idle');
     }
   };
 
@@ -175,8 +196,33 @@ export default function DropView({ drop, seller }: Props) {
 
           {/* Buy button — 44px+ tap target */}
           {soldOut ? (
-            <div className="w-full rounded-xl bg-white/20 px-4 py-4 text-center text-lg font-bold text-white/60">
-              Sold Out
+            <div className="space-y-3">
+              <div className="w-full rounded-xl bg-white/20 px-4 py-4 text-center text-lg font-bold text-white/60">
+                Sold Out
+              </div>
+              {waitlistState === 'joined' ? (
+                <div className="rounded-lg bg-green-500/90 px-4 py-2.5 text-center text-sm font-medium text-white">
+                  You're on the list! We'll email you if it restocks.
+                </div>
+              ) : (
+                <form onSubmit={handleJoinWaitlist} className="flex gap-2">
+                  <input
+                    type="email"
+                    required
+                    value={waitlistEmail}
+                    onChange={(e) => setWaitlistEmail(e.target.value)}
+                    placeholder="you@email.com"
+                    className="min-w-0 flex-1 rounded-lg border border-white/40 bg-black/30 px-4 py-2.5 text-sm text-white placeholder-white/50 focus:border-white focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={waitlistState === 'saving'}
+                    className="shrink-0 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
+                  >
+                    {waitlistState === 'saving' ? '...' : 'Notify me'}
+                  </button>
+                </form>
+              )}
             </div>
           ) : (
             <button

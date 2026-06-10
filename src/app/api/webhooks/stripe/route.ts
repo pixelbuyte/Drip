@@ -3,6 +3,90 @@ import Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase-admin';
 
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+// Order creation on payment. Layered idempotency: the event-ID claim plus
+// the UNIQUE constraint on orders.stripe_session_id.
+async function handleCheckoutCompleted(
+  supabase: AdminClient,
+  session: Stripe.Checkout.Session
+) {
+  const dropId = session.metadata?.drip_drop_id;
+  const sellerId = session.metadata?.drip_seller_id;
+  if (!dropId || !sellerId) {
+    console.error(`Session ${session.id} missing drip metadata; skipping`);
+    return;
+  }
+
+  if (session.payment_status !== 'paid') return;
+
+  // Already recorded (e.g. retried event with a fresh event ID)? Done.
+  const { data: existing } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('stripe_session_id', session.id)
+    .maybeSingle();
+  if (existing) return;
+
+  // Atomic conditional decrement: NULL result means another checkout took
+  // the last unit between session creation and payment.
+  const { data: newInventory, error: decrementError } = await supabase.rpc(
+    'decrement_inventory',
+    { drop_id_param: dropId }
+  );
+  if (decrementError) throw decrementError;
+
+  const oversold = newInventory === null;
+
+  if (oversold && session.payment_intent) {
+    // Refund the buyer in full and pull the funds back from the seller's
+    // connected account (destination charge -> reverse_transfer).
+    try {
+      await getStripe().refunds.create({
+        payment_intent: session.payment_intent as string,
+        reverse_transfer: true,
+        refund_application_fee: true,
+      });
+    } catch (refundErr) {
+      console.error(`Oversell refund failed for session ${session.id}:`, refundErr);
+      throw refundErr; // keep the event retryable — buyer must be refunded
+    }
+  }
+
+  const shipping = session.shipping_details;
+  const shippingCents = parseInt(session.metadata?.drip_shipping_cents ?? '0', 10) || 0;
+
+  const { error: orderError } = await supabase.from('orders').insert({
+    drop_id: dropId,
+    seller_id: sellerId,
+    stripe_session_id: session.id,
+    buyer_email: session.customer_details?.email ?? '',
+    buyer_name: shipping?.name ?? session.customer_details?.name ?? '',
+    shipping_address: shipping?.address
+      ? {
+          name: shipping.name,
+          street1: shipping.address.line1,
+          street2: shipping.address.line2,
+          city: shipping.address.city,
+          state: shipping.address.state,
+          zip: shipping.address.postal_code,
+          country: shipping.address.country,
+        }
+      : null,
+    amount_cents: session.amount_total ?? 0,
+    shipping_cents: shippingCents,
+    status: oversold ? 'refunded' : 'paid',
+  });
+
+  if (orderError) {
+    // Duplicate session ID means a concurrent handler already recorded it.
+    if (orderError.code === '23505') return;
+    throw orderError;
+  }
+
+  // Step 6: buy EasyPost label + send buyer/seller emails from here.
+}
+
 export async function POST(request: NextRequest) {
   const stripe = getStripe();
   const signature = request.headers.get('stripe-signature');
@@ -56,9 +140,11 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // Step 5 wires these up: order creation + atomic inventory decrement.
-      case 'checkout.session.completed':
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        await handleCheckoutCompleted(supabase, session);
         break;
+      }
 
       default:
         break;

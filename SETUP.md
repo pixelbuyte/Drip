@@ -1,5 +1,35 @@
 # Drip Setup Guide
 
+# Step 5: Order Creation + Atomic Inventory + Waitlist
+
+## What's Been Built
+
+- **`checkout.session.completed` handler** (in the Stripe webhook):
+  - **Atomic inventory decrement** via the conditional-UPDATE pattern: `UPDATE drops SET inventory = inventory - 1 WHERE id = $1 AND inventory >= 1 RETURNING inventory` — two checkouts racing for the last unit can never both succeed (migration `00004` replaces the old `FOR UPDATE` function)
+  - **Order record** created with buyer name/email + shipping address from Checkout, amount, shipping cents, variant metadata
+  - **Oversell auto-refund**: if the decrement returns NULL (a concurrent checkout took the last unit between session creation and payment), the buyer is refunded in full with `reverse_transfer: true` (funds pulled back from the seller's connected account) and the order is recorded as `refunded` for audit
+  - **Layered idempotency**: event-ID claim + pre-check on `orders.stripe_session_id` + UNIQUE constraint as the final backstop
+- **Waitlist** — when a drop is sold out, the public page swaps the buy button for a "Notify me" email capture (`POST /api/waitlist`, deduped per drop+email). Doubles as lead-gen for the seller; the back-in-stock email sends in Step 6
+- **Migration `00004`** — new `decrement_inventory`, `waitlist_entries` table (seller-readable via RLS), `refunded` order status
+
+## Setup for Step 5
+
+1. Run migration `supabase/migrations/00004_orders_waitlist.sql`
+2. Make sure `stripe listen --forward-to localhost:3000/api/webhooks/stripe` is running with `checkout.session.completed` events included (default: all events)
+
+## What to Test Before Step 6
+
+- [ ] Buy a drop with test card `4242...` → within seconds: inventory decremented in Supabase, order row created with status `paid`, buyer email + US shipping address captured
+- [ ] `amount_cents` = item + shipping (minus discount if used); `shipping_cents` matches the Checkout line item
+- [ ] Buy with a discount code → order still records correctly
+- [ ] Replay the webhook event → `duplicate: true`, inventory NOT decremented twice
+- [ ] Set inventory to 1, complete a purchase → drop shows Sold Out on the public page
+- [ ] **Oversell drill**: set inventory to 0 in Supabase, then complete a checkout session created beforehand → buyer auto-refunded (check Stripe Dashboard → Payments), order recorded as `refunded`
+- [ ] On a sold-out drop: join the waitlist → row in `waitlist_entries`; joining twice with the same email still returns success, no duplicate row
+- [ ] Seller can SELECT their waitlist rows in Supabase; other sellers' rows invisible (RLS)
+
+---
+
 # Step 4: Public Drop Page + Stripe Checkout (the money page)
 
 ## What's Been Built
