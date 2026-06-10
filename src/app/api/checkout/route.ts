@@ -69,10 +69,11 @@ export async function POST(request: NextRequest) {
   // only — a coupon never leaks across sellers.
   let discountCouponId: string | null = null;
   let discountCodeUsed: string | null = null;
+  let discountPercent = 0;
   if (input.code) {
     const { data: discount } = await supabase
       .from('discount_codes')
-      .select('stripe_coupon_id, code')
+      .select('stripe_coupon_id, code, percent_off')
       .eq('seller_id', seller.id)
       .eq('code', input.code.toUpperCase())
       .eq('active', true)
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
     }
     discountCouponId = discount.stripe_coupon_id;
     discountCodeUsed = discount.code;
+    discountPercent = discount.percent_off;
   }
 
   const shippingCents = await estimateFlatShippingCents(
@@ -94,6 +96,13 @@ export async function POST(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
   const dropUrl = `${appUrl}/@${seller.handle}/${drop.slug}`;
   const variantLabel = variants.map((d) => selection[d.name]).join(' / ');
+
+  // Stripe coupons apply percent-off across ALL line items (shipping
+  // included), so the fee is computed on the discounted amounts — what the
+  // buyer is actually charged.
+  const discountFactor = 1 - discountPercent / 100;
+  const discountedItemCents = Math.round(drop.price_cents * discountFactor);
+  const discountedTotalCents = Math.round((drop.price_cents + shippingCents) * discountFactor);
 
   try {
     const stripe = getStripe();
@@ -128,8 +137,9 @@ export async function POST(request: NextRequest) {
       ...(discountCouponId ? { discounts: [{ coupon: discountCouponId }] } : {}),
       payment_intent_data: {
         transfer_data: { destination: seller.stripe_account_id },
-        // 0 at launch (founding seller program); plumbed for the 8% flip.
-        application_fee_amount: applicationFeeAmount(drop.price_cents),
+        // Drip commission (0 during founding program) + Stripe processing
+        // passthrough, so the platform never subsidizes card fees.
+        application_fee_amount: applicationFeeAmount(discountedItemCents, discountedTotalCents),
         metadata: {
           drip_drop_id: drop.id,
           drip_seller_id: seller.id,

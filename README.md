@@ -7,7 +7,7 @@ A web-only seller checkout tool for video commerce. Sellers upload a short produ
 - **Next.js (App Router)** + TypeScript + Tailwind — deployed on Vercel
 - **Supabase** — auth (email + Google), Postgres with RLS
 - **Mux** — direct video upload + playback (60s max)
-- **Stripe Connect Express** — destination charges to seller accounts; platform fee plumbed at 0% (founding seller program)
+- **Stripe Connect Express** — destination charges to seller accounts with an `application_fee_amount` on every sale
 - **EasyPost** — USPS label purchase + tracking webhooks
 - **Resend** — transactional email (receipts, labels, tracking, back-in-stock)
 
@@ -18,6 +18,19 @@ A web-only seller checkout tool for video commerce. Sellers upload a short produ
 3. **The money page** — `drip.app/@handle/drop-slug`: full-bleed autoplay video, one-tap Stripe Checkout (Apple Pay/Google Pay), guest-only
 4. **Post-purchase** — webhook decrements inventory atomically, buys the USPS label, emails seller (label + packing slip) and buyer (receipt + tracking); delivery tracked via EasyPost webhooks
 5. **Dashboard** — orders with label actions, revenue + pending payout, per-drop views/sales, CSV export, discount codes, restock + waitlist
+
+## How Drip makes money
+
+Every sale carries an `application_fee_amount`, taken automatically before the seller is paid:
+
+```
+application fee = Drip commission + Stripe processing passthrough (2.9% + $0.30)
+```
+
+- **Founding sellers (launch):** commission = 0% (`DRIP_FEE_BPS = 0` in `src/lib/stripe.ts`). The fee only covers Stripe's processing cost — Drip earns $0 but never subsidizes a sale. Marketed honestly as "0% Drip commission"; sellers pay card processing like they would anywhere (Whatnot charges 8% **and** 2.9% + $0.30 on top).
+- **After validation:** flip `DRIP_FEE_BPS` to `800` (8% — the Whatnot-validated rate, still far below TikTok Shop's 15–55% effective or Poshmark's 20%).
+
+The 0% period is the acquisition weapon, not the business model: no seller moves to an empty platform unless it costs them nothing.
 
 ## Local development
 

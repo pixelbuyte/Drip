@@ -206,7 +206,7 @@ Nothing new — uses existing Stripe/Mux/EasyPost keys. (Mux view counts require
 - **`POST /api/webhooks/stripe`** — signature-verified, idempotent webhook handler; `account.updated` keeps `charges_enabled` in sync (`checkout.session.completed` stubbed for Step 5)
 - **`/onboarding/stripe/return`** — post-onboarding landing page; shows 🎉 + redirect to dashboard when verified, or a human-readable list of missing requirements with a "Continue Stripe Setup" button
 - **Idempotency table** — `processed_events` (migration `00002`), UNIQUE on `(provider, event_id)`; duplicate webhook deliveries are acknowledged without reprocessing, and failed handlers release their claim so Stripe retries work
-- **Fee plumbing** — `APPLICATION_FEE_BPS = 0` in `src/lib/stripe.ts`; flip to `800` later without touching checkout code
+- **Fee plumbing** — `application_fee_amount` = Drip commission (`DRIP_FEE_BPS = 0` during the founding program; flip to `800` later without touching checkout code) **+ Stripe processing passthrough (2.9% + $0.30)** so the platform never pays card fees out of pocket on destination charges
 
 ## Setup for Step 2
 
