@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getStripe, applicationFeeAmount } from '@/lib/stripe';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { estimateFlatShippingCents } from '@/lib/shipping';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 const checkoutSchema = z.object({
   drop_id: z.string().uuid(),
@@ -12,6 +13,13 @@ const checkoutSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  if (!rateLimit(`checkout:${clientIp(request)}`, 10, 60_000)) {
+    return NextResponse.json(
+      { error: 'Too many checkout attempts. Try again in a minute.' },
+      { status: 429 }
+    );
+  }
+
   let input;
   try {
     input = checkoutSchema.parse(await request.json());

@@ -27,6 +27,8 @@ export default function DropView({ drop, seller }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [waitlistEmail, setWaitlistEmail] = useState('');
   const [waitlistState, setWaitlistState] = useState<'idle' | 'saving' | 'joined'>('idle');
+  const [reportState, setReportState] = useState<'idle' | 'open' | 'sent'>('idle');
+  const [reportReason, setReportReason] = useState('prohibited_item');
 
   const soldOut = drop.inventory <= 0;
   const lowStock = !soldOut && drop.inventory <= 5;
@@ -237,6 +239,47 @@ export default function DropView({ drop, seller }: Props) {
           <p className="text-center text-xs text-white/50">
             Secure checkout by Stripe · Ships from the US · Powered by Drip
           </p>
+
+          {/* Report flow (trust & safety) */}
+          <div className="text-center">
+            {reportState === 'sent' ? (
+              <span className="text-xs text-white/50">Report received — thank you.</span>
+            ) : reportState === 'open' ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await fetch('/api/report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ drop_id: drop.id, reason: reportReason }),
+                  });
+                  setReportState('sent');
+                }}
+                className="flex items-center justify-center gap-2"
+              >
+                <select
+                  value={reportReason}
+                  onChange={(e) => setReportReason(e.target.value)}
+                  className="rounded border border-white/30 bg-black/40 px-2 py-1 text-xs text-white"
+                >
+                  <option value="prohibited_item">Prohibited item</option>
+                  <option value="copyright">Copyright</option>
+                  <option value="scam">Scam / fraud</option>
+                  <option value="other">Other</option>
+                </select>
+                <button type="submit" className="text-xs text-white/70 underline">
+                  Submit
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => setReportState('open')}
+                className="text-xs text-white/40 underline"
+              >
+                Report this drop
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

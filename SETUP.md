@@ -1,5 +1,34 @@
 # Drip Setup Guide
 
+# Step 8: Polish — Error Handling, Archiving, Trust & Safety, Rate Limiting
+
+## What's Been Built
+
+- **Global error boundary + 404 page** — friendly recovery screens instead of stack traces
+- **Drop archiving** — Archive/Unarchive buttons; archived drops 404 publicly (the RLS public-read policy only matches `active`) but stay in the dashboard with their stats
+- **Report flow** — "Report this drop" link on every public drop page (reason: prohibited item / copyright / scam / other) → `reports` table (migration `00005`, service-role only). MVP moderation queue = review rows in Supabase
+- **Legal pages** — `/legal/terms`, `/legal/privacy`, `/legal/prohibited-items`, linked from the landing footer. Terms include the research-driven clauses: **seller is merchant of record + responsible for taxes**, 18+ requirement, chargeback liability, and a **DMCA §512(c) takedown section**. Prohibited items mirror Stripe's restricted-business list. *These are templates — review with an attorney before public launch.*
+- **Rate limiting** — per-IP sliding window on `/api/checkout` (10/min), `/api/waitlist` (5/min), `/api/report` (5/min). In-memory per instance: an abuse speed bump for MVP, swap for Upstash/Redis at scale
+
+## Manual launch checklist (not code)
+
+- [ ] **Register a DMCA designated agent** with the U.S. Copyright Office ($6, dmca.copyright.gov) and put the real contact in `/legal/terms` — required for §512 safe harbor; expires every 3 years
+- [ ] Have an attorney review the three legal pages (especially the tax/merchant-of-record position)
+- [ ] Stripe: enable Radar, confirm Apple Pay/Google Pay domains registered for production
+- [ ] Resend: verify the sending domain, set `RESEND_FROM_EMAIL`
+- [ ] Production webhooks: Stripe, Mux, EasyPost all pointed at the deployed domain with prod secrets
+
+## What to Test
+
+- [ ] Run migration `supabase/migrations/00005_reports.sql`
+- [ ] Visit a garbage URL → branded 404
+- [ ] Archive a live drop → public page 404s, dashboard still shows it with Unarchive; unarchive → live again
+- [ ] Report a drop → row in `reports`; 6 rapid reports from one IP → 429
+- [ ] 11 rapid checkout attempts → 429
+- [ ] `/legal/*` pages render with styled typography, footer links work
+
+---
+
 # Step 7: Seller Dashboard
 
 ## What's Been Built

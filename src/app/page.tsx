@@ -71,6 +71,14 @@ export default function Home() {
             <p className="mt-2 text-gray-600">Post in your TikTok bio, earn instantly</p>
           </div>
         </div>
+
+        <footer className="mt-20 border-t border-gray-200 pt-8 text-center text-sm text-gray-500">
+          <a href="/legal/terms" className="hover:text-gray-700">Terms</a>
+          {' · '}
+          <a href="/legal/privacy" className="hover:text-gray-700">Privacy</a>
+          {' · '}
+          <a href="/legal/prohibited-items" className="hover:text-gray-700">Prohibited Items</a>
+        </footer>
       </div>
     </div>
   );

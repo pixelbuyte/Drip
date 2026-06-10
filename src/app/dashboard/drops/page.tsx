@@ -82,6 +82,13 @@ export default function DropsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const setStatus = async (drop: Drop, status: 'active' | 'archived') => {
+    const { error } = await supabase.from('drops').update({ status }).eq('id', drop.id);
+    if (!error) {
+      setDrops((ds) => ds.map((d) => (d.id === drop.id ? { ...d, status } : d)));
+    }
+  };
+
   const restock = async (drop: Drop) => {
     const answer = window.prompt(`New inventory for "${drop.title}"?`, '10');
     if (!answer) return;
@@ -177,7 +184,21 @@ export default function DropsPage() {
                           Restock
                         </button>
                       )}
+                      <button
+                        onClick={() => setStatus(drop, 'archived')}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50"
+                      >
+                        Archive
+                      </button>
                     </>
+                  )}
+                  {drop.status === 'archived' && (
+                    <button
+                      onClick={() => setStatus(drop, 'active')}
+                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Unarchive
+                    </button>
                   )}
                   {drop.status === 'rejected' && (
                     <span className="text-sm text-red-600">

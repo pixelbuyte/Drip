@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 const waitlistSchema = z.object({
   drop_id: z.string().uuid(),
@@ -11,6 +12,10 @@ const waitlistSchema = z.object({
 // Buyers have no accounts, so inserts go through the service role after
 // validating the drop. Duplicate signups are treated as success.
 export async function POST(request: NextRequest) {
+  if (!rateLimit(`waitlist:${clientIp(request)}`, 5, 60_000)) {
+    return NextResponse.json({ error: 'Too many requests. Try again later.' }, { status: 429 });
+  }
+
   let input;
   try {
     input = waitlistSchema.parse(await request.json());
