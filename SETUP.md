@@ -1,5 +1,39 @@
 # Drip Setup Guide
 
+# Step 3: Mux Upload + Drop Creation (+ Variants, Discounts, From-Address)
+
+## What's Been Built
+
+- **`POST /api/drops`** — validates product fields (zod), gates on `charges_enabled` AND a saved from-address, generates a per-seller unique slug, inserts the drop as `processing`, and creates a Mux direct upload (`passthrough` = drop ID) returning the upload URL
+- **`POST /api/webhooks/mux`** — verifies the `mux-signature` HMAC, idempotent via `processed_events`; `video.asset.ready` enforces the 60s cap (rejects longer videos) and flips the drop to `active` with its `mux_playback_id`; `video.asset.errored`/`video.upload.errored` → `rejected`
+- **`/dashboard/drops/new`** — two-phase flow: product form (title, description w/ char counter, price, inventory, package weight + dims, optional variants) → `<MuxUploader>` with progress
+- **Variants** — up to 2 dimensions (e.g. Size, Color), 5 options each, all inherit base price; stored as JSONB, validated server-side
+- **`/dashboard/drops`** — list with status badges (Processing / Live / Rejected), copy-link + view buttons
+- **`/dashboard/settings`** — US-only ship-from address (state dropdown, ZIP validation), saved to `profiles.from_address`, reused for every label
+- **`/dashboard/discounts`** — create/deactivate percent-off codes; each is backed by a Stripe coupon on the platform account and applied **per-seller** at checkout (we never use `allow_promotion_codes`, which would make codes platform-wide)
+- **Migration `00003`** — `mux_upload_id` + `variants` columns, drop lifecycle (`processing → active | rejected | archived`), `discount_codes` table with RLS
+
+## Setup for Step 3
+
+1. Run migration `supabase/migrations/00003_drops_video_variants_discounts.sql`
+2. Create a Mux account → Settings → API Access Tokens → set `MUX_TOKEN_ID` + `MUX_TOKEN_SECRET`
+3. Mux Dashboard → Settings → Webhooks → add `https://<your-tunnel>/api/webhooks/mux` (use ngrok/cloudflared locally) → copy signing secret into `MUX_WEBHOOK_SECRET`
+
+## What to Test Before Step 4
+
+- [ ] Without a from-address: dashboard shows the amber warning; `POST /api/drops` returns the "add your address" error
+- [ ] Save a from-address in Settings → bad ZIP / missing state rejected, valid address persists across reload
+- [ ] Create a drop with variants (Size: S,M,L + Color: Black,White) → upload a short vertical video → progress bar shows → "processing" confirmation
+- [ ] Within ~1-2 min, Mux webhook fires → drop flips to **Live** in `/dashboard/drops`, `mux_playback_id` populated in Supabase
+- [ ] Upload a video **over 60s** → drop ends up **Rejected**
+- [ ] Copy link button produces `https://<host>/@handle/slug` (page itself is Step 4)
+- [ ] Two drops with the same title → slugs are `title` and `title-2`
+- [ ] Create discount code `SAVE10` (10%) → appears in list AND as a coupon in Stripe Dashboard; duplicate code rejected with 409
+- [ ] Deactivate the code → grays out with strikethrough
+- [ ] Replay a Mux webhook event → `duplicate: true`, no reprocessing
+
+---
+
 # Step 2: Stripe Connect Express Onboarding
 
 ## What's Been Built

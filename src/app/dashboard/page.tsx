@@ -77,16 +77,47 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        <div className="mt-8 grid gap-6 md:grid-cols-2">
-          <div className="rounded-lg border border-gray-200 bg-white p-6">
-            <h2 className="text-lg font-semibold text-gray-900">Your Drops</h2>
-            <p className="mt-2 text-gray-600">Step 2 & 3: Create your first video listing</p>
+        {!profile?.from_address && (
+          <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm text-amber-900">
+              ⚠️ Add your{' '}
+              <a href="/dashboard/settings" className="font-semibold underline">
+                ship-from address
+              </a>{' '}
+              before creating your first drop — it's required for shipping labels.
+            </p>
           </div>
+        )}
+
+        <div className="mt-8 grid gap-6 md:grid-cols-2">
+          <a
+            href="/dashboard/drops"
+            className="rounded-lg border border-gray-200 bg-white p-6 hover:border-blue-300 hover:shadow-sm"
+          >
+            <h2 className="text-lg font-semibold text-gray-900">My Drops</h2>
+            <p className="mt-2 text-gray-600">Create and manage your video listings</p>
+          </a>
 
           <div className="rounded-lg border border-gray-200 bg-white p-6">
             <h2 className="text-lg font-semibold text-gray-900">Orders</h2>
-            <p className="mt-2 text-gray-600">Step 4 & 5: View your sales and orders</p>
+            <p className="mt-2 text-gray-600">Coming in Step 5: view your sales and orders</p>
           </div>
+
+          <a
+            href="/dashboard/discounts"
+            className="rounded-lg border border-gray-200 bg-white p-6 hover:border-blue-300 hover:shadow-sm"
+          >
+            <h2 className="text-lg font-semibold text-gray-900">Discount Codes</h2>
+            <p className="mt-2 text-gray-600">Create promo codes for your buyers</p>
+          </a>
+
+          <a
+            href="/dashboard/settings"
+            className="rounded-lg border border-gray-200 bg-white p-6 hover:border-blue-300 hover:shadow-sm"
+          >
+            <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
+            <p className="mt-2 text-gray-600">Ship-from address for your labels</p>
+          </a>
         </div>
       </div>
     </div>

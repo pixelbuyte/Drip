@@ -8,6 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
+    "@mux/mux-node": "^14.1.1",
+    "@mux/mux-uploader-react": "^1.5.0",
     "@supabase/auth-ui-react": "^0.4.6",
     "@supabase/auth-ui-shared": "^0.1.8",
     "@supabase/ssr": "^0.12.0",
