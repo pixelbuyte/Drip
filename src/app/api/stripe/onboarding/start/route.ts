@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createServerClient_ } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-admin';
 
 export async function POST() {
   const supabase = await createServerClient_();
@@ -53,7 +54,10 @@ export async function POST() {
 
       accountId = account.id;
 
-      const { error: updateError } = await supabase
+      // stripe_account_id is attested by Stripe, not by the seller: the
+      // authenticated role has no UPDATE privilege on it (migration 00006),
+      // so this write goes through the service role.
+      const { error: updateError } = await createAdminClient()
         .from('profiles')
         .update({ stripe_account_id: accountId })
         .eq('id', user.id);
