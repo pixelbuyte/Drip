@@ -20,7 +20,7 @@ export type CommitCause = 'init' | 'idle' | 'scrollend';
  */
 export function useSnapIndex(opts: {
   scrollerRef: React.RefObject<HTMLElement | null>;
-  slideHeight: number;
+  /** Live count, read through a ref so appends never re-subscribe. */
   count: number;
   onCommit: (index: number, cause: CommitCause) => void;
 }) {
@@ -40,8 +40,13 @@ export function useSnapIndex(opts: {
     let idle: ReturnType<typeof setTimeout> | undefined;
 
     const commit = (cause: CommitCause) => {
-      const { slideHeight, count } = latest.current;
-      if (!el || !slideHeight) return;
+      const { count } = latest.current;
+      // Measured live rather than passed in. A render-time snapshot goes stale
+      // on an orientation change or a mobile toolbar collapse — the resize
+      // handler updates a ref but triggers no render, so the detector divided
+      // by the old height and stopped committing for the rest of the session.
+      const slideHeight = el.clientHeight;
+      if (!slideHeight) return;
       const raw = el.scrollTop / slideHeight;
       const nearest = Math.round(raw);
       // Not parked on a snap point: interrupted fling, rubber-band bounce, or

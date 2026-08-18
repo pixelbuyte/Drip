@@ -29,6 +29,14 @@ export type SliceParams = {
   categorySlug?: string | null;
   sellerHandle?: string | null;
   limit?: number;
+  /**
+   * published_at of the oldest item already served. Reverse-chronological
+   * paging needs a cursor: without one the query always returns the newest
+   * page, and once exclude_ids covers it the caller gets an empty slice and
+   * shows "You're all caught up" while buyable inventory sits below the
+   * window.
+   */
+  before?: string | null;
 };
 
 type ProductRow = {
@@ -82,7 +90,7 @@ function toVariantGroups(raw: unknown): VariantGroup[] {
 export async function getFeedSlice(
   db: SupabaseClient,
   params: SliceParams
-): Promise<{ items: FeedItem[]; exhausted: boolean }> {
+): Promise<{ items: FeedItem[]; exhausted: boolean; nextBefore: string | null }> {
   const limit = params.limit ?? FEED_SLICE_SIZE;
 
   // Blocks are a hard filter (spec 2.2): a viewer who said not_interested on a
@@ -131,6 +139,8 @@ export async function getFeedSlice(
     .order('published_at', { ascending: false })
     .limit(overFetch);
 
+  if (params.before) query = query.lt('published_at', params.before);
+
   if (params.categorySlug) query = query.eq('categories.slug', params.categorySlug);
   if (params.sellerHandle) query = query.eq('profiles.handle', params.sellerHandle);
   if (excluded.size > 0) {
@@ -144,7 +154,9 @@ export async function getFeedSlice(
   if (error) throw new Error(`feed query failed: ${error.message}`);
 
   const items: FeedItem[] = [];
+  let oldestSeen: string | null = null;
   for (const v of data ?? []) {
+    oldestSeen = v.published_at;
     if (items.length >= limit) break;
     if (blockedSellers.has(v.seller_id)) continue;
     if (!v.profiles) continue;
@@ -193,10 +205,12 @@ export async function getFeedSlice(
     });
   }
 
-  // Exhausted only when the underlying page was short — a full page that
-  // filtered down to nothing means "ask again", not "the end".
-  const exhausted = items.length === 0 && (data?.length ?? 0) < overFetch;
-  return { items, exhausted };
+  // Exhausted only when the underlying page was short. A full page that
+  // filtered down to nothing means "ask again from the cursor", not "the end"
+  // — the caller re-requests with nextBefore.
+  const pageWasShort = (data?.length ?? 0) < overFetch;
+  const exhausted = items.length === 0 && pageWasShort;
+  return { items, exhausted, nextBefore: pageWasShort ? null : oldestSeen };
 }
 
 /**

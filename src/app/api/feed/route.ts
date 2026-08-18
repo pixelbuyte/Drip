@@ -23,6 +23,8 @@ const querySchema = z.object({
   // Accepted and echoed, not yet honored — step 10 owns it.
   mode: z.enum(['default', 'diversify']).default('default'),
   offset: z.coerce.number().int().min(0).max(5_000).default(0),
+  // Cursor for reverse-chronological paging; see getFeedSlice.
+  before: z.string().datetime({ offset: true }).optional(),
 });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -58,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const db = createAdminClient();
-    const { items, exhausted } = await getFeedSlice(db, {
+    const { items, exhausted, nextBefore } = await getFeedSlice(db, {
       anonId,
       sessionId: params.session_id,
       surface: params.surface as FeedSurface,
@@ -66,6 +68,7 @@ export async function GET(request: NextRequest) {
       categorySlug: params.category ?? null,
       sellerHandle: params.seller ?? null,
       limit: FEED_SLICE_SIZE,
+      before: params.before ?? null,
     });
 
     // Non-blocking: attribution is useful, but never at the cost of the feed.
@@ -82,6 +85,7 @@ export async function GET(request: NextRequest) {
       surface: params.surface as FeedSurface,
       exhausted,
       mode: params.mode,
+      nextBefore,
     };
 
     return NextResponse.json(body, {

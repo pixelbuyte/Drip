@@ -66,6 +66,8 @@ export type FeedResponse = {
    * keeping it in the contract now means the client never has to change.
    */
   mode: 'default' | 'diversify';
+  /** published_at cursor for the next slice; null when the tail is reached. */
+  nextBefore: string | null;
 };
 
 export const FEED_SLICE_SIZE = 20;

@@ -454,17 +454,17 @@ BEGIN
   IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
     CREATE EXTENSION IF NOT EXISTS pg_cron;
     
-    SELECT cron.schedule('video-stats-rollup',      '* * * * *',
+    PERFORM cron.schedule('video-stats-rollup',      '* * * * *',
       $$SELECT public.rollup_video_stats()$$);
-    SELECT cron.schedule('feed-dedupe-sweep',       '*/5 * * * *',
+    PERFORM cron.schedule('feed-dedupe-sweep',       '*/5 * * * *',
       $$SELECT public.sweep_feed_event_dedupe()$$);
-    SELECT cron.schedule('category-counts',         '*/10 * * * *',
+    PERFORM cron.schedule('category-counts',         '*/10 * * * *',
       $$SELECT public.refresh_category_counts()$$);
-    SELECT cron.schedule('feed-events-partitions',  '0 3 1 * *',
+    PERFORM cron.schedule('feed-events-partitions',  '0 3 1 * *',
       $$SELECT public.ensure_feed_events_partitions(3)$$);
-    SELECT cron.schedule('feed-events-retention',   '30 3 1 * *',
+    PERFORM cron.schedule('feed-events-retention',   '30 3 1 * *',
       $$SELECT public.drop_old_feed_events_partitions(6)$$);
-    SELECT cron.schedule('viewer-counters-prune',   '0 4 * * 0',
+    PERFORM cron.schedule('viewer-counters-prune',   '0 4 * * 0',
       $$DELETE FROM public.viewer_video_counters
          WHERE last_event_at < now() - interval '180 days'$$);
   ELSE

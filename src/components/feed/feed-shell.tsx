@@ -39,7 +39,7 @@ export default function FeedShell({
   const registry = useRef<Registry>(new Map());
   const impressed = useRef<Set<string>>(new Set());
   const loading = useRef(false);
-  const slideHeight = useRef(0);
+  const cursor = useRef<string | null>(null);
 
   useEffect(() => {
     setSurface(surface);
@@ -59,29 +59,28 @@ export default function FeedShell({
     }
   }, []);
 
-  useEffect(() => {
-    slideHeight.current = scrollerRef.current?.clientHeight ?? 0;
-    const onResize = () => {
-      slideHeight.current = scrollerRef.current?.clientHeight ?? 0;
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
   const fetchMore = useCallback(async () => {
     if (loading.current || exhausted) return;
     loading.current = true;
     try {
-      const exclude = items.map((i) => i.videoId).slice(-300).join(',');
+      // 36-char uuids + separators: the endpoint caps the string at 8,000
+      // bytes, which is 216 ids. Sending 300 made the request 400 outright
+      // once a session got long enough, which read to the viewer as the feed
+      // simply ending.
+      const exclude = items.map((i) => i.videoId).slice(-200).join(',');
       const url =
         `/api/feed?session_id=${getSessionId()}&surface=${surface}` +
         `&offset=${items.length}` +
-        (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '');
+        (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '') +
+        (cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : '');
       const res = await fetch(url, { credentials: 'same-origin' });
       if (!res.ok) return;
       const data = (await res.json()) as FeedResponse;
-      if (data.items.length === 0) setExhausted(true);
-      else setItems((prev) => [...prev, ...data.items]);
+      cursor.current = data.nextBefore;
+      // An empty slice with a cursor still pointing somewhere means this page
+      // filtered down to nothing, not that the feed ended — ask again.
+      if (data.items.length === 0 && !data.nextBefore) setExhausted(true);
+      else if (data.items.length > 0) setItems((prev) => [...prev, ...data.items]);
     } catch {
       /* the shell keeps whatever it has; the viewer sees no error mid-scroll */
     } finally {
@@ -96,13 +95,19 @@ export default function FeedShell({
 
       // Read the outgoing clock BEFORE pauseAndReset zeroes it. Order matters.
       if (outgoing && outgoingItem && committedRef.current !== index) {
-        const watched = outgoing.currentTimeMs();
+        // Cumulative, not the playhead: <video loop> resets currentTime every
+        // pass, so a viewer who watched a clip five times through would be
+        // recorded as a sub-2s skip and punished by the quality signal — the
+        // exact inverse of what they did.
+        const duration = outgoing.durationMs();
+        const loops = outgoing.loopCount();
+        const watched = outgoing.currentTimeMs() + loops * duration;
         emit({
           t: 'skip',
           v: outgoingItem.videoId,
           wm: watched,
-          dm: outgoing.durationMs(),
-          lc: outgoing.loopCount(),
+          dm: duration,
+          lc: loops,
           pos: committedRef.current,
         });
       }
@@ -132,12 +137,7 @@ export default function FeedShell({
   );
 
   const committedRef = useRef(0);
-  useSnapIndex({
-    scrollerRef,
-    slideHeight: slideHeight.current || 1,
-    count: items.length,
-    onCommit,
-  });
+  useSnapIndex({ scrollerRef, count: items.length, onCommit });
 
   // One owner for playback. useLayoutEffect, not useEffect: the outgoing pause
   // must land in the same frame as the commit or two soundtracks overlap.
