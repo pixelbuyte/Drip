@@ -170,6 +170,16 @@
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  /* The single most important line here. An overflow-x:auto flex child
+     computes its own "preferred" width as the unwrapped max-content width of
+     everything inside it, then hands that up as its ancestors' minimum
+     content size — so a horizontally-scrolling chip rail was silently
+     forcing every ancestor grid/flex column (including the hero's H1) wider
+     than the viewport, with the excess hard-clipped by overflow-x-clip on
+     the page root instead of producing a scrollbar the h-overflow check
+     would have caught. min-width: 0 lets the rail actually shrink to its
+     assigned track width and scroll its own content instead. */
+  min-width: 0;
   &::-webkit-scrollbar { display: none; }
   & > * { scroll-snap-align: start; flex-shrink: 0; }
 }
