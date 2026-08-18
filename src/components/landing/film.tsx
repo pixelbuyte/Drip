@@ -2,9 +2,6 @@
 
 import { useRef, useState } from 'react';
 
-// preload="none" and no autoplay: the film is 3MB and must never compete with
-// the hero for bandwidth. The poster is the video's own first frame, so the
-// swap on play is invisible.
 export default function Film() {
   const [playing, setPlaying] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
@@ -19,11 +16,8 @@ export default function Film() {
   };
 
   return (
-    <div className="bezel rounded-shell bg-s2 p-2 shadow-module">
-      <div
-        className="relative overflow-hidden rounded-core bg-s1"
-        style={{ aspectRatio: '16 / 9', boxShadow: 'var(--inset-core)' }}
-      >
+    <div className="rounded-banner bg-card p-2 shadow-card">
+      <div className="relative overflow-hidden rounded-[20px] bg-cream" style={{ aspectRatio: '16 / 9' }}>
         <video
           ref={video}
           poster="/media/drip-launch-poster.jpg"
@@ -41,13 +35,13 @@ export default function Film() {
           <button
             onClick={start}
             className="group absolute inset-0 flex items-center justify-center"
-            aria-label="Play the Drip launch film, 35 seconds, no sound"
+            aria-label="Play the Drip film, 30 seconds, no sound"
           >
-            <span className="bezel flex items-center gap-4 rounded-full bg-s2/80 py-2 pl-6 pr-2 backdrop-blur-xl transition-transform duration-[240ms] ease-state group-hover:scale-[1.02] group-active:scale-[0.985]">
-              <span className="text-[0.9375rem] font-medium text-fg">Play the film</span>
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-fg">
+            <span className="flex items-center gap-3 rounded-full bg-card py-2 pl-6 pr-2 shadow-float transition-transform duration-200 group-hover:scale-[1.03] group-active:scale-[0.97]">
+              <span className="text-[15px] font-bold text-ink">Play the film</span>
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-coral">
                 <svg width="11" height="12" viewBox="0 0 11 12" aria-hidden>
-                  <path d="M1 1L10 6L1 11V1Z" fill="var(--color-void)" />
+                  <path d="M1 1L10 6L1 11V1Z" fill="var(--color-ink)" />
                 </svg>
               </span>
             </span>
