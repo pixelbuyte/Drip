@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getStripe } from '@/lib/stripe';
 import { createServerClient_ } from '@/lib/supabase-server';
+import { createAdminClient } from '@/lib/supabase-admin';
 
 // Fetches the live account state from Stripe, syncs charges_enabled to the
 // profile, and surfaces outstanding requirements so the UI can tell the
@@ -31,7 +32,9 @@ export async function GET() {
     const chargesEnabled = account.charges_enabled === true;
 
     if (chargesEnabled !== profile.charges_enabled) {
-      await supabase
+      // charges_enabled mirrors Stripe's KYC verdict; sellers cannot write
+      // it themselves (migration 00006), so sync it as the service role.
+      await createAdminClient()
         .from('profiles')
         .update({ charges_enabled: chargesEnabled })
         .eq('id', user.id);

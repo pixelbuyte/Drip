@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Drip
 
-## Getting Started
+A web-only seller checkout tool for video commerce. Sellers upload a short product video, tag it with price + inventory, and get a shareable checkout link for their TikTok/Instagram bio. Buyers watch and buy — no accounts, no feed, no marketplace. US-only, USD-only.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Next.js (App Router)** + TypeScript + Tailwind — deployed on Vercel
+- **Supabase** — auth (email + Google), Postgres with RLS
+- **Mux** — direct video upload + playback (60s max)
+- **Stripe Connect Express** — destination charges to seller accounts with an `application_fee_amount` on every sale
+- **EasyPost** — USPS label purchase + tracking webhooks
+- **Resend** — transactional email (receipts, labels, tracking, back-in-stock)
+
+## How it works
+
+1. **Seller onboarding** — sign up, pick a handle, complete Stripe Express verification (listing creation is blocked until `charges_enabled`)
+2. **Create a drop** — upload video, set price/inventory/variants/package size; goes live when Mux finishes processing
+3. **The money page** — `drip.app/@handle/drop-slug`: full-bleed autoplay video, one-tap Stripe Checkout (Apple Pay/Google Pay), guest-only
+4. **Post-purchase** — webhook decrements inventory atomically, buys the USPS label, emails seller (label + packing slip) and buyer (receipt + tracking); delivery tracked via EasyPost webhooks
+5. **Dashboard** — orders with label actions, revenue + pending payout, per-drop views/sales, CSV export, discount codes, restock + waitlist
+
+## How Drip makes money
+
+Every sale carries an `application_fee_amount`, taken automatically before the seller is paid:
+
+```
+application fee = Drip commission + Stripe processing passthrough (2.9% + $0.30)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Founding sellers (launch):** commission = 0% (`DRIP_FEE_BPS = 0` in `src/lib/stripe.ts`). The fee only covers Stripe's processing cost — Drip earns $0 but never subsidizes a sale. Marketed honestly as "0% Drip commission"; sellers pay card processing like they would anywhere (Whatnot charges 8% **and** 2.9% + $0.30 on top).
+- **After validation:** flip `DRIP_FEE_BPS` to `800` (8% — the Whatnot-validated rate, still far below TikTok Shop's 15–55% effective or Poshmark's 20%).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The 0% period is the acquisition weapon, not the business model: no seller moves to an empty platform unless it costs them nothing.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Local development
 
-## Learn More
+```bash
+npm install
+cp .env.local.example .env.local   # fill in keys
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Run the SQL migrations in `supabase/migrations/` (in order) against your Supabase project. Forward webhooks locally:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+stripe listen --forward-to localhost:3000/api/webhooks/stripe
+# Mux + EasyPost webhooks need a tunnel (ngrok / cloudflared)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See `SETUP.md` for a step-by-step build log with per-step test checklists.
 
-## Deploy on Vercel
+## Hard rules baked in
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- US addresses only, USD only
+- Atomic inventory decrement (conditional UPDATE) — no overselling, oversold races auto-refund
+- All webhook handlers verify signatures and are idempotent (`processed_events` dedup)
+- No marketplace feed, no buyer accounts, no live streaming, no chat

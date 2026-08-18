@@ -1,10 +1,10 @@
 'use client';
 
 import { Auth } from '@supabase/auth-ui-react';
-import { ThemeSupa } from '@supabase/auth-ui-shared';
 import { createClient } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { authAppearance } from '../auth-appearance';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,31 +24,54 @@ export default function LoginPage() {
   }, [supabase, router]);
 
   if (isLoading) {
-    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-ink">
+        <span className="font-mono text-xs uppercase tracking-[0.3em] text-dim">Drip</span>
+      </div>
+    );
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md space-y-8">
+    <div className="grain relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-ink px-5 py-12">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-32 left-1/2 h-[26rem] w-[44rem] -translate-x-1/2 rounded-full opacity-15 blur-[110px]"
+        style={{ background: 'radial-gradient(closest-side, #d8ff3e, transparent)' }}
+      />
+
+      <div className="relative z-10 w-full max-w-sm">
         <div className="text-center">
-          <h1 className="text-3xl font-bold">Drip</h1>
-          <p className="mt-2 text-sm text-gray-600">Video commerce made simple</p>
+          <a href="/" className="inline-flex items-baseline gap-2">
+            <span className="font-display text-3xl font-extrabold tracking-tight text-paper">
+              Drip
+            </span>
+            <span className="h-1.5 w-1.5 rounded-full bg-acid" />
+          </a>
+          <h1 className="mt-6 font-display text-2xl font-bold tracking-tight text-paper">
+            Welcome back
+          </h1>
+          <p className="mt-2 text-sm text-dim">Sign in to your seller dashboard.</p>
         </div>
 
-        <Auth
-          supabaseClient={supabase}
-          view="sign_in"
-          appearance={{ theme: ThemeSupa }}
-          theme="light"
-          redirectTo={`${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`}
-          onlyThirdPartyProviders={false}
-          providers={['google']}
-        />
+        <div className="mt-8 rounded-2xl border border-line bg-ink-raised p-6">
+          <Auth
+            supabaseClient={supabase}
+            view="sign_in"
+            appearance={authAppearance}
+            theme="dark"
+            redirectTo={`${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`}
+            onlyThirdPartyProviders={false}
+            providers={['google']}
+          />
+        </div>
 
-        <p className="text-center text-sm text-gray-600">
-          Don't have an account?{' '}
-          <a href="/auth/signup" className="font-semibold text-blue-600 hover:text-blue-500">
-            Sign up
+        <p className="mt-6 text-center text-sm text-dim">
+          New here?{' '}
+          <a
+            href="/auth/signup"
+            className="font-semibold text-acid underline-offset-4 hover:underline"
+          >
+            Create an account
           </a>
         </p>
       </div>
