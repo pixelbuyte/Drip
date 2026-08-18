@@ -6,6 +6,7 @@ import { emit, flushEvents, getSessionId, installEventFlushHandlers, setSurface 
 import { useSnapIndex } from '@/hooks/use-snap-index';
 import FeedVideo from './feed-video';
 import ProductBar from './product-bar';
+import ProductSheet from './product-sheet';
 import { stageFor, WINDOW_AFTER, WINDOW_BEFORE, type FeedVideoHandle, type Registry } from './playback-registry';
 
 const MUTE_KEY = 'drip_muted';
@@ -25,9 +26,14 @@ export default function FeedShell({
   const [exhausted, setExhausted] = useState(initialExhausted);
   const [needsTap, setNeedsTap] = useState(false);
   const [nudgeAt, setNudgeAt] = useState<number | null>(null);
+  const [openProduct, setOpenProduct] = useState<{ videoId: string; productId: string } | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const mutedRef = useRef(true);
+  // Playback is suspended while a sheet is open. Held in a ref because
+  // register() fires on every re-render (inline callback refs detach and
+  // reattach) and must not restart a video the sheet deliberately paused.
+  const suspendedRef = useRef(false);
   const registry = useRef<Registry>(new Map());
   const impressed = useRef<Set<string>>(new Set());
   const loading = useRef(false);
@@ -139,6 +145,7 @@ export default function FeedShell({
   // current and two would play at once. Refs make every invocation agree on
   // what "current" means, whenever it fires.
   const startCurrent = useCallback(async () => {
+    if (suspendedRef.current) return;
     const index = committedRef.current;
     const cur = registry.current.get(index);
     if (!cur) return;
@@ -162,8 +169,15 @@ export default function FeedShell({
     for (const [i, h] of registry.current) {
       if (i !== committedRef.current) h.pauseAndReset();
     }
+    suspendedRef.current = openProduct !== null;
+    if (openProduct) {
+      // The sheet pauses the video but must not unload it: dismissing has to
+      // resume the very same frame.
+      registry.current.get(committedRef.current)?.pauseHold();
+      return;
+    }
     void startCurrent();
-  }, [committed, muted, startCurrent]);
+  }, [committed, muted, startCurrent, openProduct]);
 
   const register = useCallback(
     (i: number, h: FeedVideoHandle | null) => {
@@ -174,8 +188,9 @@ export default function FeedShell({
       registry.current.set(i, h);
       // A slide can mount after its commit already happened; start it if it
       // is the current one, and make sure it is silent if it is not.
-      if (i === committedRef.current) void startCurrent();
-      else h.pauseAndReset();
+      if (i !== committedRef.current) h.pauseAndReset();
+      else if (suspendedRef.current) h.pauseHold();
+      else void startCurrent();
     },
     [startCurrent]
   );
@@ -241,6 +256,10 @@ export default function FeedShell({
             }}
             aria-roledescription="feed item"
             aria-label={`${item.seller.displayName}: ${item.caption ?? item.products[0]?.title ?? 'video'}`}
+            // Neighbours are mounted for prefetch but are not on screen. Without
+            // inert their product bars stay tabbable and clickable, so a keyboard
+            // user can open a sheet for a video they are not looking at.
+            {...(i === committed ? {} : { inert: '' as unknown as boolean })}
           >
             {mounted && stage ? (
               <>
@@ -283,6 +302,7 @@ export default function FeedShell({
                   nudge={nudgeAt === i}
                   onOpen={(productId) => {
                     emit({ t: 'product_tap', v: item.videoId, p: productId, pos: i });
+                    setOpenProduct({ videoId: item.videoId, productId });
                   }}
                 />
               </>
@@ -302,6 +322,29 @@ export default function FeedShell({
           </p>
         </section>
       )}
+
+      <ProductSheet
+        product={
+          openProduct
+            ? (items
+                .find((it) => it.videoId === openProduct.videoId)
+                ?.products.find((p) => p.id === openProduct.productId) ?? null)
+            : null
+        }
+        videoId={openProduct?.videoId ?? ''}
+        onClose={() => setOpenProduct(null)}
+        onCheckout={(selection, quantity) => {
+          if (!openProduct) return;
+          emit({
+            t: 'checkout_open',
+            v: openProduct.videoId,
+            p: openProduct.productId,
+            meta: { selection, quantity },
+          });
+          // Step 5 mounts the checkout sheet here. Until then the intent is
+          // recorded, which is what the funnel metric reads.
+        }}
+      />
 
       {needsTap && (
         <button
