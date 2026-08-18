@@ -25,7 +25,11 @@ const eventSchema = z.object({
   pos: z.number().int().min(0).max(5000).optional(),
   wm: z.number().int().min(0).max(86_400_000).optional(),
   dm: z.number().int().min(0).max(3_600_000).optional(),
-  lc: z.number().int().min(0).max(10_000).optional(),
+  // Bounded low on purpose: a 60s clip looping 500 times is >8h of
+  // continuous watching. Unbounded, avg(loop_count) overflowed
+  // video_stats.avg_loop_count and aborted the rollup for every video
+  // on the platform, not just the sender's.
+  lc: z.number().int().min(0).max(500).optional(),
   b: z.string().max(32).optional(),
   meta: z.record(z.unknown()).optional(),
 });

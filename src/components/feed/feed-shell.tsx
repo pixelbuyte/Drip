@@ -272,6 +272,17 @@ export default function FeedShell({
                   isLcpCandidate={i === 0}
                   handleRef={(h) => register(i, h)}
                   onError={() => emit({ t: 'video_error', v: item.videoId, pos: i })}
+                  onProgress={(bucket, watchedMs, durationMs, loops) =>
+                    emit({
+                      t: 'watch_progress',
+                      v: item.videoId,
+                      b: String(bucket),
+                      wm: watchedMs,
+                      dm: durationMs,
+                      lc: loops,
+                      pos: i,
+                    })
+                  }
                 />
                 <div
                   className="absolute inset-0"

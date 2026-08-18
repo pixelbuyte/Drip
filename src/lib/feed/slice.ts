@@ -212,7 +212,9 @@ export async function recordSlice(
     session_id: args.sessionId,
     anon_id: args.anonId,
     video_id: it.videoId,
-    lane: null,
+    // NOT NULL. This wrote null and every insert failed silently, so no slice
+    // was ever attributed. The naive feed's lane is 'chrono'.
+    lane: it.lane,
     position: args.offset + i,
     score: null,
   }));

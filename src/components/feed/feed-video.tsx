@@ -16,6 +16,7 @@ export default function FeedVideo({
   handleRef,
   onError,
   onLoop,
+  onProgress,
   isLcpCandidate,
 }: {
   playbackId: string | null;
@@ -24,11 +25,13 @@ export default function FeedVideo({
   handleRef: Ref<FeedVideoHandle>;
   onError?: () => void;
   onLoop?: () => void;
+  onProgress?: (bucket: 25 | 50 | 75 | 95, watchedMs: number, durationMs: number, loops: number) => void;
   isLcpCandidate?: boolean;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const loops = useRef(0);
   const lastTime = useRef(0);
+  const fired = useRef<Set<number>>(new Set());
 
   useImperativeHandle(handleRef, (): FeedVideoHandle => ({
     play: async () => {
@@ -46,6 +49,8 @@ export default function FeedVideo({
         /* not seekable yet */
       }
       loops.current = 0;
+      lastTime.current = 0;   // or a late timeupdate reads as a loop
+      fired.current.clear();
     },
     pauseHold: () => ref.current?.pause(),
     resume: () => {
@@ -63,20 +68,32 @@ export default function FeedVideo({
     el: () => ref.current,
   }));
 
-  // Count loops without a 'ended' event: loop videos never fire it.
+  // Count loops without an 'ended' event: looping videos never fire one.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const onTime = () => {
       if (el.currentTime < lastTime.current - 0.5) {
         loops.current += 1;
+        fired.current.clear(); // each loop re-arms the progress buckets
         onLoop?.();
       }
       lastTime.current = el.currentTime;
+
+      const dur = el.duration;
+      if (Number.isFinite(dur) && dur > 0) {
+        const pct = (el.currentTime / dur) * 100;
+        for (const bucket of [25, 50, 75, 95] as const) {
+          if (pct >= bucket && !fired.current.has(bucket)) {
+            fired.current.add(bucket);
+            onProgress?.(bucket, Math.round(el.currentTime * 1000), Math.round(dur * 1000), loops.current);
+          }
+        }
+      }
     };
     el.addEventListener('timeupdate', onTime);
     return () => el.removeEventListener('timeupdate', onTime);
-  }, [onLoop]);
+  }, [onLoop, onProgress]);
 
   const src = playbackId ? `https://stream.mux.com/${playbackId}/low.mp4` : undefined;
 

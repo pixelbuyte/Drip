@@ -91,8 +91,11 @@ export function flushEvents(useBeacon = false): void {
   if (queue.length === 0) return;
   const batch = queue.slice(0, MAX_BATCH);
   queue = queue.slice(MAX_BATCH);
+  // Envelope keys are terse to fit sendBeacon payload limits, and MUST match
+  // the batchSchema in src/app/api/events/route.ts. They disagreed once and
+  // every batch 400'd silently; src/lib/events/__tests__ now pins the contract.
   post(
-    JSON.stringify({ session_id: getSessionId(), surface, events: batch }),
+    JSON.stringify({ sid: getSessionId(), sf: surface, sent_at: Date.now(), e: batch }),
     useBeacon
   );
   if (queue.length > 0) scheduleFlush();
