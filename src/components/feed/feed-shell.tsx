@@ -7,6 +7,7 @@ import { useSnapIndex } from '@/hooks/use-snap-index';
 import FeedVideo from './feed-video';
 import ProductBar from './product-bar';
 import ProductSheet from './product-sheet';
+import CheckoutSheet, { type CheckoutRequest } from './checkout-sheet';
 import { stageFor, WINDOW_AFTER, WINDOW_BEFORE, type FeedVideoHandle, type Registry } from './playback-registry';
 
 const MUTE_KEY = 'drip_muted';
@@ -27,6 +28,7 @@ export default function FeedShell({
   const [needsTap, setNeedsTap] = useState(false);
   const [nudgeAt, setNudgeAt] = useState<number | null>(null);
   const [openProduct, setOpenProduct] = useState<{ videoId: string; productId: string } | null>(null);
+  const [checkout, setCheckout] = useState<CheckoutRequest | null>(null);
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const mutedRef = useRef(true);
@@ -169,15 +171,15 @@ export default function FeedShell({
     for (const [i, h] of registry.current) {
       if (i !== committedRef.current) h.pauseAndReset();
     }
-    suspendedRef.current = openProduct !== null;
-    if (openProduct) {
+    suspendedRef.current = openProduct !== null || checkout !== null;
+    if (suspendedRef.current) {
       // The sheet pauses the video but must not unload it: dismissing has to
       // resume the very same frame.
       registry.current.get(committedRef.current)?.pauseHold();
       return;
     }
     void startCurrent();
-  }, [committed, muted, startCurrent, openProduct]);
+  }, [committed, muted, startCurrent, openProduct, checkout]);
 
   const register = useCallback(
     (i: number, h: FeedVideoHandle | null) => {
@@ -341,8 +343,23 @@ export default function FeedShell({
             p: openProduct.productId,
             meta: { selection, quantity },
           });
-          // Step 5 mounts the checkout sheet here. Until then the intent is
-          // recorded, which is what the funnel metric reads.
+          setCheckout({
+            videoId: openProduct.videoId,
+            productId: openProduct.productId,
+            quantity,
+            selection,
+          });
+        }}
+      />
+
+      <CheckoutSheet
+        request={checkout}
+        onClose={() => setCheckout(null)}
+        onKeepWatching={() => {
+          // Back to the same video, at the same frame — the whole point of
+          // checkout living inside the feed.
+          setCheckout(null);
+          setOpenProduct(null);
         }}
       />
 
