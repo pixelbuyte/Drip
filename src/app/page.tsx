@@ -77,7 +77,7 @@ export default function Home() {
       <main>
         {/* ══ HERO ═════════════════════════════════════════════════════════ */}
         <section className="mx-auto max-w-[1240px] px-5 pb-14 pt-24 md:px-6 md:pt-32">
-          <div className="grid items-center gap-10 md:grid-cols-12">
+          <div className="grid grid-cols-1 items-center gap-10 md:grid-cols-12">
             <div className="md:col-span-6">
               <div data-enter="rise">
                 <SearchField className="mb-4 flex md:hidden" />
@@ -167,7 +167,7 @@ export default function Home() {
 
         {/* ══ SHOPPING LIST ════════════════════════════════════════════════ */}
         <section id="lists" className="mx-auto max-w-[1240px] px-5 py-20 md:px-6 md:py-28">
-          <div className="grid items-center gap-10 md:grid-cols-12">
+          <div className="grid grid-cols-1 items-center gap-10 md:grid-cols-12">
             <div className="md:col-span-5">
               <div data-enter="rise">
                 <Eyebrow tone="pink">Lists</Eyebrow>
