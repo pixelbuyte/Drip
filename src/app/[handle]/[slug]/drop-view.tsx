@@ -86,7 +86,7 @@ export default function DropView({ drop, seller }: Props) {
   };
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-black">
+    <div className="relative h-dvh w-full overflow-hidden bg-ink">
       {/* Full-bleed vertical video */}
       {drop.mux_playback_id && (
         <MuxPlayer
@@ -115,7 +115,7 @@ export default function DropView({ drop, seller }: Props) {
       </button>
 
       {/* Seller badge */}
-      <div className="absolute left-4 top-4 z-20 rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white backdrop-blur-sm">
+      <div className="absolute left-4 top-4 z-20 rounded-full bg-black/50 px-3 py-1.5 font-mono text-xs text-paper backdrop-blur">
         @{seller.handle}
       </div>
 
@@ -124,15 +124,15 @@ export default function DropView({ drop, seller }: Props) {
         <div className="mx-auto max-w-lg space-y-3">
           <div className="flex items-end justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold text-white">{drop.title}</h1>
+              <h1 className="font-display text-2xl font-bold leading-tight tracking-tight text-paper">{drop.title}</h1>
               {drop.description && (
-                <p className="mt-1 text-sm text-white/80">{drop.description}</p>
+                <p className="mt-1 text-sm leading-relaxed text-paper/70">{drop.description}</p>
               )}
             </div>
             <div className="text-right">
-              <div className="text-2xl font-bold text-white">{price}</div>
+              <div className="font-mono text-2xl font-semibold text-paper">{price}</div>
               {lowStock && (
-                <div className="text-sm font-medium text-amber-400">
+                <div className="font-mono text-xs uppercase tracking-wide text-ember">
                   Only {drop.inventory} left
                 </div>
               )}
@@ -143,7 +143,7 @@ export default function DropView({ drop, seller }: Props) {
           {!soldOut &&
             drop.variants.map((dim) => (
               <div key={dim.name}>
-                <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-white/70">
+                <div className="mb-1.5 font-mono text-[0.65rem] uppercase tracking-[0.2em] text-paper/60">
                   {dim.name}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -153,8 +153,8 @@ export default function DropView({ drop, seller }: Props) {
                       onClick={() => setSelection((s) => ({ ...s, [dim.name]: opt }))}
                       className={`min-h-11 min-w-11 rounded-lg border px-4 py-2 text-sm font-medium transition ${
                         selection[dim.name] === opt
-                          ? 'border-white bg-white text-black'
-                          : 'border-white/40 bg-black/30 text-white'
+                          ? 'border-paper bg-paper text-ink'
+                          : 'border-white/25 bg-white/5 text-paper/80 hover:border-white/50'
                       }`}
                     >
                       {opt}
@@ -176,13 +176,13 @@ export default function DropView({ drop, seller }: Props) {
                   }
                   maxLength={20}
                   placeholder="DISCOUNT CODE"
-                  className="w-full rounded-lg border border-white/40 bg-black/30 px-4 py-2.5 font-mono text-sm text-white placeholder-white/50 focus:border-white focus:outline-none"
+                  className="w-full rounded-lg border border-white/25 bg-white/5 px-4 py-2.5 font-mono text-sm text-paper placeholder-paper/40 focus:border-acid focus:outline-none"
                   autoFocus
                 />
               ) : (
                 <button
                   onClick={() => setShowCode(true)}
-                  className="text-sm text-white/70 underline"
+                  className="text-sm text-paper/60 underline underline-offset-4 transition hover:text-paper"
                 >
                   Have a discount code?
                 </button>
@@ -191,7 +191,7 @@ export default function DropView({ drop, seller }: Props) {
           )}
 
           {error && (
-            <div className="rounded-lg bg-red-500/90 px-4 py-2.5 text-sm font-medium text-white">
+            <div className="rounded-lg border border-ember/50 bg-ember/15 px-4 py-2.5 text-sm font-medium text-paper">
               {error}
             </div>
           )}
@@ -199,11 +199,11 @@ export default function DropView({ drop, seller }: Props) {
           {/* Buy button — 44px+ tap target */}
           {soldOut ? (
             <div className="space-y-3">
-              <div className="w-full rounded-xl bg-white/20 px-4 py-4 text-center text-lg font-bold text-white/60">
+              <div className="w-full rounded-xl border border-ember/40 bg-ember/10 px-4 py-4 text-center font-display text-lg font-bold text-ember">
                 Sold Out
               </div>
               {waitlistState === 'joined' ? (
-                <div className="rounded-lg bg-green-500/90 px-4 py-2.5 text-center text-sm font-medium text-white">
+                <div className="rounded-lg border border-acid/40 bg-acid/10 px-4 py-2.5 text-center text-sm font-medium text-acid">
                   You're on the list! We'll email you if it restocks.
                 </div>
               ) : (
@@ -214,12 +214,12 @@ export default function DropView({ drop, seller }: Props) {
                     value={waitlistEmail}
                     onChange={(e) => setWaitlistEmail(e.target.value)}
                     placeholder="you@email.com"
-                    className="min-w-0 flex-1 rounded-lg border border-white/40 bg-black/30 px-4 py-2.5 text-sm text-white placeholder-white/50 focus:border-white focus:outline-none"
+                    className="min-w-0 flex-1 rounded-lg border border-white/25 bg-white/5 px-4 py-2.5 text-sm text-paper placeholder-paper/40 focus:border-acid focus:outline-none"
                   />
                   <button
                     type="submit"
                     disabled={waitlistState === 'saving'}
-                    className="shrink-0 rounded-lg bg-white px-4 py-2.5 text-sm font-bold text-black disabled:opacity-60"
+                    className="shrink-0 rounded-lg bg-acid px-4 py-2.5 text-sm font-bold text-ink transition hover:brightness-110 disabled:opacity-60"
                   >
                     {waitlistState === 'saving' ? '...' : 'Notify me'}
                   </button>
@@ -230,20 +230,20 @@ export default function DropView({ drop, seller }: Props) {
             <button
               onClick={handleBuy}
               disabled={isBuying}
-              className="w-full rounded-xl bg-white px-4 py-4 text-lg font-bold text-black transition active:scale-[0.98] disabled:opacity-60"
+              className="w-full rounded-xl bg-acid px-4 py-4 font-display text-lg font-bold text-ink transition hover:brightness-110 active:scale-[0.98] disabled:opacity-60"
             >
               {isBuying ? 'Starting checkout...' : `Buy now · ${price}`}
             </button>
           )}
 
-          <p className="text-center text-xs text-white/50">
+          <p className="text-center font-mono text-[0.65rem] tracking-wide text-paper/45">
             Secure checkout by Stripe · Ships from the US · Powered by Drip
           </p>
 
           {/* Report flow (trust & safety) */}
           <div className="text-center">
             {reportState === 'sent' ? (
-              <span className="text-xs text-white/50">Report received — thank you.</span>
+              <span className="font-mono text-[0.65rem] text-paper/45">Report received — thank you.</span>
             ) : reportState === 'open' ? (
               <form
                 onSubmit={async (e) => {
@@ -260,21 +260,21 @@ export default function DropView({ drop, seller }: Props) {
                 <select
                   value={reportReason}
                   onChange={(e) => setReportReason(e.target.value)}
-                  className="rounded border border-white/30 bg-black/40 px-2 py-1 text-xs text-white"
+                  className="rounded border border-white/25 bg-ink px-2 py-1 text-xs text-paper"
                 >
                   <option value="prohibited_item">Prohibited item</option>
                   <option value="copyright">Copyright</option>
                   <option value="scam">Scam / fraud</option>
                   <option value="other">Other</option>
                 </select>
-                <button type="submit" className="text-xs text-white/70 underline">
+                <button type="submit" className="text-xs text-paper/70 underline underline-offset-2">
                   Submit
                 </button>
               </form>
             ) : (
               <button
                 onClick={() => setReportState('open')}
-                className="text-xs text-white/40 underline"
+                className="font-mono text-[0.65rem] text-paper/35 underline underline-offset-2 transition hover:text-paper/70"
               >
                 Report this drop
               </button>
