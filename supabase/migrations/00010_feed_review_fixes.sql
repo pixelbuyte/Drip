@@ -97,3 +97,124 @@ REVOKE EXECUTE ON FUNCTION public.decrement_product_inventory(uuid, smallint)
   FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.decrement_product_inventory(uuid, smallint)
   TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 5. Liking a video deleted its save, and saving deleted its like.
+--
+-- The upsert recomputed BOTH columns from the current batch alone and treated
+-- "absent from this batch" as "clear it", never falling back to the stored
+-- value. A batch containing only a `like` therefore wrote saved_at = NULL,
+-- silently unsaving something the viewer had put on their list — the single
+-- most visible data loss available in this schema, since the shopping list is
+-- the reason they come back.
+--
+-- COALESCE to the existing row, and only clear on an explicit unlike/unsave.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.apply_video_reactions(
+  p_anon_id uuid,
+  p_video_id uuid,
+  p_liked boolean,      -- true = like, false = unlike, null = untouched
+  p_saved boolean       -- true = save, false = unsave, null = untouched
+)
+RETURNS void
+LANGUAGE sql
+SET search_path = public, pg_temp
+AS $$
+  INSERT INTO public.viewer_video_reactions AS r (anon_id, video_id, liked_at, saved_at)
+  VALUES (
+    p_anon_id, p_video_id,
+    CASE WHEN p_liked THEN now() END,
+    CASE WHEN p_saved THEN now() END
+  )
+  ON CONFLICT (anon_id, video_id) DO UPDATE SET
+    liked_at = CASE
+                 WHEN p_liked IS NULL     THEN r.liked_at   -- untouched
+                 WHEN p_liked             THEN COALESCE(r.liked_at, now())
+                 ELSE NULL                                  -- explicit unlike
+               END,
+    saved_at = CASE
+                 WHEN p_saved IS NULL     THEN r.saved_at
+                 WHEN p_saved             THEN COALESCE(r.saved_at, now())
+                 ELSE NULL
+               END,
+    updated_at = now();
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.apply_video_reactions(uuid, uuid, boolean, boolean)
+  FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.apply_video_reactions(uuid, uuid, boolean, boolean)
+  TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 6. The rollup's staleness sweep was gated on impressions_1h > 0, so a video
+-- whose impressions aged out of the 1h window but which still has taps, carts
+-- or purchases in it was never recomputed again — velocity_1h froze at its
+-- last value forever. Combined with the catch-all dedupe allowance that is how
+-- one device could pin a video's velocity permanently.
+--
+-- Sweep on ANY non-zero 1h counter, not impressions alone.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.stale_video_stat_ids(p_older_than interval DEFAULT interval '5 minutes')
+RETURNS TABLE (video_id uuid)
+LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT vs.video_id
+  FROM public.video_stats vs
+  WHERE vs.last_computed_at < now() - p_older_than
+    AND (vs.impressions_1h > 0
+      OR vs.product_taps_1h > 0
+      OR vs.add_to_carts_1h > 0
+      OR vs.purchases_1h > 0
+      OR vs.velocity_1h > 0);
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.stale_video_stat_ids(interval) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.stale_video_stat_ids(interval) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. link_anon_identity let a SECOND account seize an anon identity already
+-- claimed by a first: the null-canonical branch repointed the row without
+-- checking whether auth_user_id was already set to somebody else. Signing in
+-- on a shared or borrowed device could therefore graft one person's browsing
+-- history onto another person's account.
+--
+-- Claim only an UNCLAIMED identity; if it already belongs to another account,
+-- leave it alone and let the new account start clean.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.claim_anon_identity(
+  p_anon_id uuid,
+  p_user_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_owner uuid;
+BEGIN
+  SELECT auth_user_id INTO v_owner
+  FROM public.viewer_identities
+  WHERE anon_id = p_anon_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    INSERT INTO public.viewer_identities (anon_id, canonical_anon_id, auth_user_id, linked_at)
+    VALUES (p_anon_id, p_anon_id, p_user_id, now());
+    RETURN true;
+  END IF;
+
+  IF v_owner IS NULL THEN
+    UPDATE public.viewer_identities
+       SET auth_user_id = p_user_id, linked_at = now()
+     WHERE anon_id = p_anon_id;
+    RETURN true;
+  END IF;
+
+  -- Already claimed. Same user: idempotent success. Different user: refuse,
+  -- rather than transplanting one person's history onto another's account.
+  RETURN v_owner = p_user_id;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_anon_identity(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.claim_anon_identity(uuid, uuid) TO service_role;

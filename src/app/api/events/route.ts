@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
-import { ANON_COOKIE, verifyAnonId, mintAnonId, hashIp } from '@/lib/anon-id';
+import { ANON_COOKIE, verifyAnonId, hashIp } from '@/lib/anon-id';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,14 +55,23 @@ export async function POST(request: NextRequest) {
     return new NextResponse(null, { status: 429 });
   }
 
-  // Identity from the signed cookie, or minted here if Proxy did not run.
+  // Identity comes from the signed cookie ONLY.
+  //
+  // This used to mint a fresh identity for any cookie-less request so a batch
+  // was never dropped. That made every spec-2.9 abuse control self-service: a
+  // non-browser client simply omits the cookie, receives a brand-new anon_id,
+  // and the per-anon caps, the dedupe keys and the Herfindahl concentration
+  // check are all keyed on an identifier the caller chose. Farming a video's
+  // stats became a loop with no cookie jar.
+  //
+  // A real browser always has the cookie: Proxy mints it before any of these
+  // routes render, and it is HttpOnly + 2-year Max-Age. Anything without one
+  // is a client that discarded it, which is precisely the traffic these caps
+  // exist to bound.
   const raw = request.cookies.get(ANON_COOKIE)?.value;
-  let anonId = raw ? await verifyAnonId(raw) : null;
-  let setCookieValue: string | null = null;
+  const anonId = raw ? await verifyAnonId(raw) : null;
   if (!anonId) {
-    const minted = await mintAnonId();
-    anonId = minted.anonId;
-    setCookieValue = minted.cookieValue;   // accept the batch, don't drop it
+    return NextResponse.json({ error: 'No viewer identity' }, { status: 401 });
   }
 
   if (!rateLimit(`events:anon:${anonId}`, 20, 60_000)) {
@@ -110,10 +119,6 @@ export async function POST(request: NextRequest) {
     { accepted: row?.accepted ?? 0, deduped: row?.deduped ?? 0, discarded: row?.discarded ?? 0 },
     { status: 202 },
   );
-  if (setCookieValue) {
-    response.cookies.set({ name: ANON_COOKIE, value: setCookieValue, httpOnly: true,
-      secure: true, sameSite: 'lax', path: '/', maxAge: 60 * 60 * 24 * 730, priority: 'high' });
-  }
   // Best-effort identity provenance for 2.9; failure is not fatal.
   void supabase.from('viewer_identities').update({ issued_ip_hash: await hashIp(ip) })
     .eq('anon_id', anonId).is('issued_ip_hash', null);
