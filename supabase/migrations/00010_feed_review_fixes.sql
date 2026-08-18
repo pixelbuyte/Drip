@@ -218,3 +218,41 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.claim_anon_identity(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.claim_anon_identity(uuid, uuid) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 8. refresh_category_counts corrupted the counts it maintains.
+--
+-- The UPDATE ... FROM joined against a subquery that only contains categories
+-- WITH live videos, then tried to handle the empty case with
+-- `OR (c.live_video_count <> 0 AND x.category_id IS NULL)`. In an UPDATE FROM
+-- that disjunct does not mean "no matching row" — it matches when a row in x
+-- has a NULL category_id (videos with no category), and then pairs that single
+-- row against EVERY category with a non-zero count, assigning all of them the
+-- uncategorized total. A category that drops to zero live videos also keeps
+-- its stale count, because no row in x matches it at all.
+--
+-- These counts drive spec 2.8's thin-supply freshness multiplier, so a wrong
+-- value silently mis-weights the ranker for a whole category.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.refresh_category_counts()
+RETURNS void
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  UPDATE public.categories c
+     SET live_video_count = sub.n
+    FROM (
+      SELECT c2.id,
+             (SELECT count(*)
+                FROM public.videos v
+               WHERE v.category_id = c2.id
+                 AND v.status = 'live')::integer AS n
+        FROM public.categories c2
+    ) sub
+   WHERE sub.id = c.id
+     AND c.live_video_count IS DISTINCT FROM sub.n;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.refresh_category_counts() FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.refresh_category_counts() TO service_role;

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { FeedProduct } from '@/lib/feed/types';
 
 const money = (cents: number) =>
@@ -29,6 +30,17 @@ export default function ProductBar({
   onOpen: (productId: string) => void;
   nudge: boolean;
 }) {
+  // The spec calls for the nudge to be disabled outright under reduced
+  // motion, not merely shortened.
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setReduced(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
   if (products.length === 0) return null;
   const multi = products.length > 1;
   const p = products[Math.min(activeIndex, products.length - 1)];
@@ -37,10 +49,15 @@ export default function ProductBar({
   return (
     <div
       className="pointer-events-auto absolute inset-x-3 bottom-[calc(env(safe-area-inset-bottom,0px)+18px)] z-30"
-      style={{
-        transform: nudge ? 'translateY(-6px)' : 'translateY(0)',
-        transition: 'transform 420ms cubic-bezier(0.32,0.72,0,1), box-shadow 420ms cubic-bezier(0.32,0.72,0,1)',
-      }}
+      style={
+        reduced
+          ? undefined
+          : {
+              transform: nudge ? 'translateY(-6px)' : 'translateY(0)',
+              transition:
+                'transform 420ms cubic-bezier(0.32,0.72,0,1), box-shadow 420ms cubic-bezier(0.32,0.72,0,1)',
+            }
+      }
     >
       <button
         type="button"

@@ -120,8 +120,20 @@ export async function POST(request: NextRequest) {
     { status: 202 },
   );
   // Best-effort identity provenance for 2.9; failure is not fatal.
-  void supabase.from('viewer_identities').update({ issued_ip_hash: await hashIp(ip) })
-    .eq('anon_id', anonId).is('issued_ip_hash', null);
+  //
+  // Must be awaited. A PostgREST builder is a lazy thenable — nothing is sent
+  // until it is subscribed, so `void builder` compiled fine and silently never
+  // issued the request. issued_ip_hash stayed null for every identity, which
+  // would have quietly disabled the provenance half of the anti-gaming work.
+  try {
+    await supabase
+      .from('viewer_identities')
+      .update({ issued_ip_hash: await hashIp(ip) })
+      .eq('anon_id', anonId)
+      .is('issued_ip_hash', null);
+  } catch (err) {
+    console.error('issued_ip_hash write failed:', err);
+  }
 
   return response;
 }
