@@ -1,20 +1,61 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { ANON_COOKIE, mintAnonId, verifyAnonId } from '@/lib/anon-id';
 
-// The landing page used to be a client component that called getSession()
-// before painting, so every logged-out visitor — the whole audience a landing
-// page exists for — watched a loading state until a network round-trip
-// resolved. The redirect lives here instead: a cookie presence check, no
-// Supabase client, no network call. Next 16 renamed `middleware` to `proxy`.
-export function proxy(request: NextRequest) {
-  const hasSession = request.cookies
-    .getAll()
-    .some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+// Two jobs, deliberately in one place because both must happen before the
+// route renders:
+//
+// 1. Anon identity. The signed device cookie must exist before the first
+//    /api/feed call and the first /api/events beacon, and both must see the
+//    same id within one page load — otherwise the impression that decides
+//    whether a session continues is attributed to nobody.
+// 2. The landing redirect. `/` is the marketing page; a signed-in seller goes
+//    to their dashboard. A cookie presence check only — no network call, or
+//    the LCP element waits on a round trip.
+export const config = {
+  matcher: [
+    '/',
+    '/feed/:path*',
+    '/v/:path*',
+    '/discover/:path*',
+    '/api/events',
+    '/api/feed/:path*',
+  ],
+};
 
-  if (hasSession) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+export async function proxy(request: NextRequest) {
+  const isLanding = request.nextUrl.pathname === '/';
+
+  if (isLanding) {
+    const hasSession = request.cookies
+      .getAll()
+      .some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+    if (hasSession) {
+      return NextResponse.redirect(new URL('/dashboard', request.url));
+    }
   }
-  return NextResponse.next();
-}
 
-export const config = { matcher: '/' };
+  const existing = request.cookies.get(ANON_COOKIE)?.value;
+  const verified = existing ? await verifyAnonId(existing) : null;
+  if (verified) return NextResponse.next();
+
+  const { anonId, cookieValue } = await mintAnonId();
+
+  // Hand the freshly minted id to this same request so the server render and
+  // any route handler it calls agree on the identity.
+  const headers = new Headers(request.headers);
+  headers.set('x-drip-anon-id', anonId);
+
+  const response = NextResponse.next({ request: { headers } });
+  response.cookies.set({
+    name: ANON_COOKIE,
+    value: cookieValue,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 730,
+    priority: 'high',
+  });
+  return response;
+}
