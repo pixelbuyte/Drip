@@ -1,88 +1,287 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* ---------------------------------------------------------------------------
-   Drip — "after hours". Near-black storefront, one acid accent, warm paper
-   text. The video is the hero on every public surface, so the chrome around
-   it stays dark and quiet and the only loud colour is the buy action.
-   Dashboard surfaces stay light: they set their own backgrounds.
---------------------------------------------------------------------------- */
+/* ===========================================================================
+   DRIP — "The Instrument"
+   Drip rendered as precision settlement hardware. Depth comes from five
+   machined surface steps and light-from-above bevels, not from glow. The
+   only ornament is the money moving through it, stated as readings.
+   White is the action colour; the accent hues are a status taxonomy, never
+   decoration. Exactly one thing on the page moves forever: the clock.
+   =========================================================================== */
 
 @theme {
-  --color-ink: #0b0b0c;
-  --color-ink-raised: #141417;
-  --color-line: #26262b;
-  --color-paper: #f5f2ea;
-  --color-dim: #8a8880;
-  --color-acid: #d8ff3e;
-  --color-ember: #ff4a26;
+  /* ── SURFACES ── blue illuminant (~215-220 hue). Never #000: it crushes on
+     OLED and destroys the luminance steps the whole system depends on. */
+  --color-void: #050608;
+  --color-s1:   #0a0c0f;   /* recessed wells, inputs */
+  --color-s2:   #0f1216;   /* Double-Bezel OUTER shell */
+  --color-s3:   #14181d;   /* Double-Bezel INNER core */
+  --color-s4:   #1a1f26;   /* hover / pressed only — never a resting surface */
 
-  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
-  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-martian), ui-monospace, "SF Mono", monospace;
+  /* ── FOREGROUND ── cool, never warm paper */
+  --color-fg:       #f5f7fa;
+  --color-fg-muted: #98a1ad;
+  --color-fg-faint: #8b95a1;   /* floor: nothing dimmer carries content */
 
-  --animate-marquee: marquee 32s linear infinite;
+  /* ── EDGES ── alpha-white only. No opaque grey border exists in this system. */
+  --color-edge-1:    rgba(255, 255, 255, 0.055);
+  --color-edge-2:    rgba(255, 255, 255, 0.09);
+  --color-edge-3:    rgba(255, 255, 255, 0.16);
+  --color-grid-rule: rgba(255, 255, 255, 0.035);
 
-  @keyframes marquee {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-50%); }
-  }
+  /* ── STATUS TAXONOMY ── each hue means exactly one thing in the order
+     state machine: paid → label → slip → scanned → delivered */
+  --color-signal: #3ddc97;   /* settled / paid / delivered. Never a button fill. */
+  --color-warn:   #f5a524;   /* in flight / pending */
+  --color-alert:  #f4614b;   /* sold out / failed */
 
-  @keyframes rise {
-    from { opacity: 0; transform: translateY(14px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
+  /* ── BONE ── the only warm values in the system, justified because §04 is
+     literally paper. */
+  --color-bone:       #f2f1ed;
+  --color-bone-card:  #ffffff;
+  --color-bone-ink:   #0b0d10;
+  --color-bone-muted: #4a5260;
+  --color-bone-faint: #5c6470;
+  --color-signal-ink: #0b7a55;
+  --color-bone-edge:  rgba(11, 13, 16, 0.07);
+
+  /* ── TYPE ── */
+  --font-display: var(--font-schibsted), ui-sans-serif, system-ui, sans-serif;
+  --font-sans:    var(--font-schibsted), ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+  --font-serif:   var(--font-newsreader), ui-serif, Georgia, serif;
+
+  --text-display-xl: clamp(2.5rem, 5.2vw, 4.5rem);
+  --text-display-xl--line-height: 0.92;
+  --text-display-xl--letter-spacing: -0.038em;
+  --text-display-l: clamp(2.125rem, 4vw, 3.5rem);
+  --text-display-l--line-height: 0.98;
+  --text-display-l--letter-spacing: -0.03em;
+  --text-display-m: clamp(1.375rem, 2vw, 1.75rem);
+  --text-display-m--line-height: 1.1;
+  --text-display-m--letter-spacing: -0.022em;
+  --text-body-l: 1.0625rem;
+  --text-body-l--line-height: 1.6;
+  --text-body-l--letter-spacing: -0.008em;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.65;
+  --text-body--letter-spacing: -0.005em;
+  --text-data-xl: clamp(2.5rem, 4.5vw, 4rem);
+  --text-data-xl--line-height: 1;
+  --text-data-xl--letter-spacing: -0.03em;
+  --text-mono-l: 0.8125rem;
+  --text-mono:   0.75rem;
+  --text-mono-s: 0.6875rem;
+
+  --tracking-mono-label:   0.08em;
+  --tracking-mono-eyebrow: 0.22em;
+
+  /* ── RADII ── concentric pairs only: inner = outer − padding */
+  --radius-shell: 28px;
+  --radius-core:  20px;
+  --radius-plate: 16px;
+  --radius-plate-core: 12px;
+  --radius-frame: 40px;
+  --radius-frame-core: 30px;
+  --radius-well: 10px;
+
+  /* ── SHADOWS ── four ambient stops. A single-stop shadow cannot describe
+     real falloff, which is why the previous pass read as flat. */
+  --shadow-module:
+    0 1px 2px -1px rgba(0, 0, 0, 0.6),
+    0 4px 10px -3px rgba(0, 0, 0, 0.55),
+    0 18px 36px -12px rgba(0, 0, 0, 0.6),
+    0 48px 90px -30px rgba(0, 0, 0, 0.7);
+  --shadow-frame:
+    0 2px 4px -2px rgba(0, 0, 0, 0.7),
+    0 10px 24px -8px rgba(0, 0, 0, 0.6),
+    0 34px 64px -20px rgba(0, 0, 0, 0.65),
+    0 90px 150px -50px rgba(0, 0, 0, 0.8);
+  --shadow-paper:
+    0 1px 1px rgba(11, 13, 16, 0.04),
+    0 6px 14px -6px rgba(11, 13, 16, 0.08),
+    0 24px 40px -20px rgba(11, 13, 16, 0.1);
+
+  /* ── EASING ── no linear, no ease, no ease-in-out anywhere. */
+  --ease-instrument: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-quick:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-state:      cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-stamp:      cubic-bezier(0.34, 1.45, 0.64, 1); /* licensed ONCE, §05 */
+
+  /* ── LEGACY ALIASES ── re-skins auth / dashboard / legal / drop-view in one
+     pass. --color-acid resolving to white kills acid lime app-wide. Delete a
+     line only when its last consumer is migrated. */
+  --color-ink:        var(--color-void);
+  --color-ink-raised: var(--color-s3);
+  --color-line:       var(--color-edge-2);
+  --color-paper:      var(--color-fg);
+  --color-dim:        var(--color-fg-muted);
+  --color-acid:       var(--color-fg);
+  --color-ember:      var(--color-alert);
+}
+
+/* Non-theme custom properties. */
+:root {
+  --inset-core:  inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --inset-paper: inset 0 1px 0 rgba(255, 255, 255, 1);
+  --dur-micro: 180ms;
+  --dur-state: 240ms;
+  --dur-reveal: 340ms;
+  --dur-entry: 760ms;
+  --dur-panel: 900ms;
 }
 
 @layer base {
   html {
-    background: var(--color-ink);
+    background: var(--color-void);
     -webkit-tap-highlight-color: transparent;
   }
 
   body {
-    color: var(--color-paper);
+    color: var(--color-fg);
     font-family: var(--font-sans);
-    font-feature-settings: "ss01", "cv01";
+  }
+
+  /* No numeral is ever set in the display face. Belt and braces: */
+  [data-num],
+  .font-mono,
+  table, tbody, td, th {
+    font-variant-numeric: tabular-nums;
   }
 
   ::selection {
-    background: var(--color-acid);
-    color: var(--color-ink);
+    background: var(--color-fg);
+    color: var(--color-void);
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-acid);
-    outline-offset: 2px;
+    outline: 2px solid var(--color-signal);
+    outline-offset: 3px;
+    border-radius: inherit;
   }
 }
 
-@layer utilities {
-  /* Film grain. Sits above the page background, below all content. */
-  .grain::before {
+/* ---------------------------------------------------------------------------
+   The bezel. A 1px gradient ring, brightest at the top, masked to the border
+   box — light falling on a machined edge, rather than a drawn grey line.
+--------------------------------------------------------------------------- */
+@utility bezel {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      180deg,
+      var(--bezel-top, rgba(255, 255, 255, 0.16)) 0%,
+      rgba(255, 255, 255, 0.07) 22%,
+      rgba(255, 255, 255, 0.03) 60%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    transition: background var(--dur-state) var(--ease-state);
+  }
+}
+
+@utility bezel-paper {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, rgba(11, 13, 16, 0.1) 0%, rgba(11, 13, 16, 0.045) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+/* Hover brightens the top stop only — one custom property, no ring repaint. */
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .bezel::before,
+  .bezel:hover::before {
+    --bezel-top: rgba(255, 255, 255, 0.22);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Dither, not grain. The previous pass used per-pixel noise at opacity 0.5
+   with mix-blend-mode: overlay, which physically masked the ~2.5% luminance
+   steps this system's depth is built from, and forced a non-isolated
+   stacking context. This is the fix for "it lacks depth".
+--------------------------------------------------------------------------- */
+@utility dither {
+  &::before {
     content: "";
     position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    opacity: 0.5;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Entry verbs. Transitions on an observer-added class, never keyframes — so
+   an element is never stranded mid-animation and reduced-motion can resolve
+   straight to the end state instead of cancelling into invisibility.
+--------------------------------------------------------------------------- */
+@layer utilities {
+  [data-enter] {
+    opacity: 0;
+    transition-property: opacity, transform, filter, clip-path;
+    transition-duration: var(--dur-entry);
+    transition-timing-function: var(--ease-instrument);
+    transition-delay: calc(var(--i, 0) * 70ms);
+    will-change: transform, opacity;
+  }
+  [data-enter="lift"]  { transform: translateY(20px); filter: blur(6px); }
+  [data-enter="rise"]  { transform: translateY(12px); }
+  [data-enter="draw"]  { opacity: 1; }
+
+  /* The mask verb clips a CHILD, never the observed element itself.
+     Chromium factors a target's own clip-path into its intersection rect, so
+     an element pre-clipped to zero width can never be observed to intersect —
+     it would deadlock and stay invisible forever. */
+  [data-enter="mask"] { opacity: 1; }
+  [data-enter="mask"] > * {
+    display: inline-block;
+    clip-path: inset(0 100% 0 0);
+    transition: clip-path var(--dur-reveal) var(--ease-quick);
+    transition-delay: calc(var(--i, 0) * 110ms);
+  }
+  [data-enter="mask"].is-in > * { clip-path: inset(0 0 0 0); }
+
+  [data-enter].is-in {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    clip-path: inset(0 0 0 0);
+    will-change: auto;
   }
 
-  /* Staggered entrance: .rise on a parent, .rise-item on the children. */
-  .rise-item {
-    animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-
-  .hairline {
-    border-color: var(--color-line);
-  }
-
+  /* Reduced motion is a designed state, never `animation: none` — which is
+     one refactor away from stranding everything at opacity 0 forever. */
   @media (prefers-reduced-motion: reduce) {
-    .rise-item,
-    .animate-marquee {
-      animation: none !important;
+    [data-enter] {
+      transition-duration: 200ms;
+      transition-delay: 0ms;
+      transform: none;
+      filter: none;
+      clip-path: inset(0 0 0 0);
     }
+    [data-enter="mask"] > * { clip-path: inset(0 0 0 0); transition-delay: 0ms; }
   }
 }

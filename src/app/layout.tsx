@@ -1,33 +1,42 @@
 import type { Metadata } from 'next';
-import { Bricolage_Grotesque, Instrument_Sans, Martian_Mono } from 'next/font/google';
+import { Schibsted_Grotesk, IBM_Plex_Mono, Newsreader } from 'next/font/google';
 import './globals.css';
 
-const display = Bricolage_Grotesque({
-  variable: '--font-bricolage',
+// Schibsted carries display and body both: a newspaper grotesk drawn for text,
+// so the page needs three families rather than four. Never set above 600 —
+// heavy weights are how landing pages shout.
+const display = Schibsted_Grotesk({
+  variable: '--font-schibsted',
   subsets: ['latin'],
   display: 'swap',
 });
 
-const sans = Instrument_Sans({
-  variable: '--font-instrument',
+// Every figure on the site is set in this: dollar amounts, timestamps, handles,
+// tracking numbers, status labels. Plex reads as back-office finance rather
+// than as a developer tool.
+const mono = IBM_Plex_Mono({
+  variable: '--font-plex-mono',
   subsets: ['latin'],
+  weight: ['400', '500'],
   display: 'swap',
 });
 
-const mono = Martian_Mono({
-  variable: '--font-martian',
+// Bone chapter only, below the fold — so it never gates LCP.
+const serif = Newsreader({
+  variable: '--font-newsreader',
   subsets: ['latin'],
   display: 'swap',
-  weight: ['400', '600'],
+  preload: false,
+  axes: ['opsz'],
 });
 
 export const metadata: Metadata = {
-  title: 'Drip — sell it where they already watch',
+  title: 'Drip — she posts the video, the video is the store',
   description:
-    'Post a 60-second video, tag it with a price, and share one link. Buyers tap once and check out. No storefront to build, no marketplace to get lost in.',
+    'Upload one vertical video. Tag it with a price. Share one link. Buyers watch full-screen and tap once — no account, no app. Drip buys the USPS label and emails the tracking.',
   openGraph: {
-    title: 'Drip — sell it where they already watch',
-    description: 'One video. One link. One tap to buy.',
+    title: 'Drip — she posts the video, the video is the store',
+    description: 'One video. One link. Two taps to paid.',
     type: 'website',
   },
 };
@@ -40,7 +49,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}
+      className={`${display.variable} ${mono.variable} ${serif.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
