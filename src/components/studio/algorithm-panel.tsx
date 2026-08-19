@@ -4,6 +4,7 @@ import type {
   HurtingFactor,
   SkippedFactor,
 } from '@/lib/studio/explain';
+import { pct, progressPct } from '@/lib/studio/format';
 
 /**
  * Spec 7.4 — the honest algorithm panel.
@@ -49,19 +50,46 @@ import type {
  */
 
 function ScoreHeader({ explanation }: { explanation: AlgorithmExplanation }) {
+  const { scoreLabel, percentilePct, percentileLabel } = explanation;
+
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <span data-num className="font-display text-[34px] font-extrabold leading-none tracking-[-0.03em] text-ink">
-        {explanation.scoreLabel}
-      </span>
-      {explanation.percentileLabel ? (
-        <span className="text-[13px] font-semibold text-muted">{explanation.percentileLabel}</span>
-      ) : (
-        // Honest absence. A video with too little history to rank says so,
-        // rather than borrowing a percentile it has not earned.
-        <span className="text-[13px] text-muted">not ranked yet</span>
+    <>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span
+          data-num
+          className="font-display text-[34px] font-extrabold leading-none tracking-[-0.03em] text-ink md:text-[42px]"
+        >
+          {scoreLabel}
+        </span>
+        {percentileLabel ? (
+          <span className="text-[13px] font-semibold text-muted">{percentileLabel}</span>
+        ) : (
+          // Honest absence. A video with too little history to rank says so,
+          // rather than borrowing a percentile it has not earned.
+          <span className="text-[13px] text-muted">not ranked yet</span>
+        )}
+      </div>
+
+      {/* The rank, drawn. The bar is the percentile and nothing else — it is
+          never a progress bar toward a target, because there is no target. */}
+      {percentilePct === null ? null : (
+        <>
+          <div
+            role="img"
+            aria-label={`Scores at or above ${pct(percentilePct)} of live videos`}
+            className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-hairline-strong"
+          >
+            <div
+              className="h-full rounded-full bg-coral transition-[width] duration-500 ease-out"
+              style={{ width: `${progressPct(percentilePct, 100)}%` }}
+            />
+          </div>
+          <p className="mt-2 text-[13px] leading-[1.5] text-muted">
+            Where it sits against every video live right now.
+          </p>
+        </>
       )}
-    </div>
+    </>
   );
 }
 
@@ -98,35 +126,71 @@ function HurtingRow({ factor }: { factor: HurtingFactor }) {
   );
 }
 
-function SkippedRow({ factor }: { factor: SkippedFactor }) {
+/**
+ * The factors that reached neither column, by name.
+ *
+ * The two reasons are kept apart on purpose. "We have no number for this yet"
+ * and "we have the number and it is doing nothing" are completely different
+ * facts, and collapsing them into one list is how a seller comes away thinking
+ * a measured, neutral factor is secretly counting against them.
+ */
+function SkippedGroup({
+  caption,
+  factors,
+  className,
+}: {
+  caption: string;
+  factors: SkippedFactor[];
+  className?: string;
+}) {
   return (
-    <li className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-      <span className="text-[13px] font-semibold text-ink">{factor.label}</span>
-      <span className="text-[13px] text-muted">{factor.note}</span>
-    </li>
+    <div className={className}>
+      <h3 className="text-[12px] font-extrabold uppercase tracking-[0.07em] text-muted">
+        {caption}
+      </h3>
+      <ul className="mt-3 flex flex-col gap-2">
+        {factors.map((f) => (
+          <li key={f.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-[13px] font-semibold text-ink">{f.label}</span>
+            <span className="text-[13px] text-muted">{f.note}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
+export type AlgorithmPanelProps = {
+  /** The ranked explanation, straight from `explainVideo()`. Nothing else. */
+  explanation: AlgorithmExplanation;
+  /** The video's title, for the panel's accessible name. Optional. */
+  videoTitle?: string | null;
+  /** Extra classes on the outer section, for page-level spacing. */
+  className?: string;
+};
+
 export default function AlgorithmPanel({
   explanation,
+  videoTitle,
   className,
-}: {
-  explanation: AlgorithmExplanation;
-  className?: string;
-}) {
+}: AlgorithmPanelProps) {
   const { helping, hurting, skipped } = explanation;
+  const unmeasured = skipped.filter((f) => f.reason === 'unmeasured');
+  const neutral = skipped.filter((f) => f.reason === 'neutral');
 
   return (
     <section
-      className={`rounded-card bg-card p-5 shadow-card ${className ?? ''}`}
-      aria-labelledby="algo-panel-heading"
+      // aria-label rather than aria-labelledby: the videos list renders several
+      // of these on one page, and a hardcoded element id would collide.
+      aria-label={`How the feed is treating ${videoTitle || 'this video'}`}
+      className={`rounded-card bg-card p-5 shadow-card md:p-7${className ? ` ${className}` : ''}`}
     >
-      <h2
-        id="algo-panel-heading"
-        className="text-[12px] font-extrabold uppercase tracking-[0.07em] text-violet"
-      >
+      <h2 className="text-[12px] font-extrabold uppercase tracking-[0.07em] text-muted">
         How the feed is treating this video
       </h2>
+      {videoTitle ? (
+        <p className="mt-1 truncate text-[13px] font-semibold text-muted">{videoTitle}</p>
+      ) : null}
 
       <div className="mt-3">
         <ScoreHeader explanation={explanation} />
@@ -155,7 +219,7 @@ export default function AlgorithmPanel({
           )}
         </div>
 
-        <div>
+        <div className="border-t border-hairline pt-6 md:border-l md:border-t-0 md:pl-6 md:pt-0">
           <h3 className="text-[12px] font-extrabold uppercase tracking-[0.07em] text-muted">
             What&rsquo;s hurting
           </h3>
@@ -177,18 +241,31 @@ export default function AlgorithmPanel({
         </div>
       </div>
 
+      {/* Everything in neither column, named. NOT behind a disclosure: a seller
+          who cannot see why a number is missing fills the gap in themselves,
+          and what they fill it in with is a punishment nobody applied. */}
       {skipped.length > 0 && (
         <div className="mt-6 border-t border-hairline pt-4">
-          <h3 className="text-[12px] font-extrabold uppercase tracking-[0.07em] text-muted">
-            Not judged yet
-          </h3>
-          <ul className="mt-3 flex flex-col gap-2">
-            {skipped.map((f) => (
-              <SkippedRow key={f.key} factor={f} />
-            ))}
-          </ul>
+          {unmeasured.length > 0 && (
+            <SkippedGroup caption="Not enough behind these to judge yet" factors={unmeasured} />
+          )}
+          {neutral.length > 0 && (
+            <SkippedGroup
+              caption="Measured, and moving nothing either way"
+              factors={neutral}
+              className={unmeasured.length > 0 ? 'mt-5' : undefined}
+            />
+          )}
         </div>
       )}
+
+      {/* The claim the two rules add up to, said out loud. It is true by
+          construction: explainVideo() accounts for every factor exactly once
+          across the three lists, and all three are rendered above. */}
+      <p className="mt-5 text-[12px] leading-[1.55] text-muted">
+        Every factor the feed weighs on a video is on this page — helping, hurting,
+        or not yet judged. Nothing about your ranking is kept off it.
+      </p>
     </section>
   );
 }
