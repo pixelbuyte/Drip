@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { ANON_COOKIE, verifyAnonId, hashIp } from '@/lib/anon-id';
+import { recordFeedEventsForAffinity } from '@/lib/feed/affinity-update';
 
 export const dynamic = 'force-dynamic';
 
@@ -140,6 +141,14 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error('issued_ip_hash write failed:', err);
   }
+
+  // Best-effort, non-blocking, same posture as the two writes above: a
+  // viewer's affinity update must never cost them their event batch's 202.
+  void recordFeedEventsForAffinity(supabase, {
+    anonId,
+    events,
+    now: new Date(now),
+  });
 
   return response;
 }
