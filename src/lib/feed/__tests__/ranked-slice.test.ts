@@ -175,6 +175,33 @@ describe('getRankedFeedSlice', () => {
     }
   });
 
+  it("excludes the session's already-served feed_slices history server-side", async () => {
+    // The client's exclude list is capped at its last 200 ids; without this,
+    // early serves re-entered the candidate set past that window and an
+    // all-duplicate page latched a false "you're all caught up".
+    const videos = [
+      videoRow({ id: 'v1', seller_id: 's1', category_id: 'c1' }),
+      videoRow({ id: 'v2', seller_id: 's2', category_id: 'c2' }),
+      videoRow({ id: 'v3', seller_id: 's3', category_id: 'c1' }),
+    ];
+    const { db } = sourceOf({
+      feed_weights: [ACTIVE_WEIGHTS_ROW],
+      category_rate_medians: [],
+      videos,
+      viewer_profiles: [],
+      follows: [],
+      viewer_blocks: [],
+      orders: [],
+      // v1 was served earlier this session — it must not come back, even
+      // though the client sent an empty exclude list.
+      feed_slices: [{ video_id: 'v1', videos: { seller_id: 's1', category_id: 'c1' } }],
+    });
+    const result = await getRankedFeedSlice(db, NOW_PARAMS);
+    expect(result).not.toBeNull();
+    expect(result!.items.length).toBeGreaterThan(0);
+    expect(result!.items.map((i) => i.videoId)).not.toContain('v1');
+  });
+
   it('is deterministic: the same fixtures and session id produce the identical slice, every time', async () => {
     // The whole point of threading rng from sessionId rather than reading
     // Math.random (candidates.ts, select.ts's own contract): two runs against

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FEED_PREFETCH_AT, type FeedItem, type FeedResponse, type FeedSurface } from '@/lib/feed/types';
-import { emit, flushEvents, getSessionId, installEventFlushHandlers, setSurface } from '@/lib/events/client';
+import { adoptSessionId, emit, flushEvents, getSessionId, installEventFlushHandlers, setSurface } from '@/lib/events/client';
 import { useSnapIndex } from '@/hooks/use-snap-index';
 import FeedVideo from './feed-video';
 import ProductBar from './product-bar';
@@ -17,6 +17,7 @@ export default function FeedShell({
   surface = 'for_you',
   initialExhausted = false,
   query,
+  sessionId,
 }: {
   initialItems: FeedItem[];
   surface?: FeedSurface;
@@ -24,7 +25,20 @@ export default function FeedShell({
   /** Present only for the search surface: redirects pagination to
    * /api/search instead of /api/feed, carrying the query along. */
   query?: string;
+  /** The server-minted session id the SSR slice was recorded under. Adopted
+   * so every event and follow-up fetch carries the same sid — see
+   * adoptSessionId. Omitted (demo page), the client mints its own. */
+  sessionId?: string;
 }) {
+  // Adopt during the FIRST RENDER, not in an effect: children's effects run
+  // before this component's would, and an impression emitted there must not
+  // mint a different sid first. A lazy state initializer runs exactly once,
+  // before any child renders.
+  useState(() => {
+    if (sessionId) adoptSessionId(sessionId);
+    return null;
+  });
+
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   const [committed, setCommitted] = useState(0);
   const [muted, setMuted] = useState(true);

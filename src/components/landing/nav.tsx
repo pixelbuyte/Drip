@@ -14,9 +14,17 @@ function Magnifier() {
   );
 }
 
-export function SearchField({ className = '' }: { className?: string }) {
+export function SearchField({
+  className = '',
+  initialValue = '',
+}: {
+  className?: string;
+  /** Seed the box with the active query (the /search results page passes the
+   *  current q so refining a search starts from it, not from empty). */
+  initialValue?: string;
+}) {
   const router = useRouter();
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialValue);
 
   const submit = () => {
     const q = value.trim();

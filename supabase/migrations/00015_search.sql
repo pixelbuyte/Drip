@@ -70,7 +70,12 @@ AS $fn$
       -- Bare lowercase words, for the hashtag overlap check below --
       -- websearch_to_tsquery stems and drops stopwords, which is wrong for
       -- an exact tag match ("running" must not match a video tagged #run).
-      array_remove(regexp_split_to_array(lower(coalesce(p_query, '')), '[^a-z0-9]+'), '') AS words
+      -- The split alphabet must match normalize_video_hashtags' (00007),
+      -- which deliberately PRESERVES underscores: splitting on '[^a-z0-9]+'
+      -- treated '_' as a delimiter, so a query word could never contain one
+      -- and a video tagged 'desk_setup' was unreachable through the hashtag
+      -- branch by any query at all.
+      array_remove(regexp_split_to_array(lower(coalesce(p_query, '')), '[^a-z0-9_]+'), '') AS words
   ),
   product_rank AS (
     SELECT vp.video_id, max(ts_rank(p.search_vector, q.tsq)) AS rank

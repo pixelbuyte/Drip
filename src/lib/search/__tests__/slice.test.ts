@@ -8,8 +8,13 @@ function sourceOf(opts: {
   rpcResult?: { video_id: string; rank: number }[];
   rpcError?: string;
   videos?: Record<string, unknown>[];
+  /** viewer_blocks rows: {subject_type: 'video'|'seller', subject_id}. */
+  blocks?: Record<string, unknown>[];
+  /** feed_slices rows already served this session: {video_id}. */
+  served?: Record<string, unknown>[];
   onUpsert?: (rows: Record<string, unknown>[]) => void;
   onRpcArgs?: (args: Record<string, unknown>) => void;
+  onServedRead?: () => void;
 }) {
   const videos = opts.videos ?? [];
   const db = {
@@ -25,8 +30,25 @@ function sourceOf(opts: {
           select: () => ({ in: () => Promise.resolve({ data: videos, error: null }) }),
         };
       }
+      if (table === 'viewer_blocks') {
+        return {
+          select: () => ({
+            eq: () => ({
+              or: () => Promise.resolve({ data: opts.blocks ?? [], error: null }),
+            }),
+          }),
+        };
+      }
       if (table === 'feed_slices') {
         return {
+          select: () => ({
+            eq: () => ({
+              limit: () => {
+                opts.onServedRead?.();
+                return Promise.resolve({ data: opts.served ?? [], error: null });
+              },
+            }),
+          }),
           upsert: (rows: Record<string, unknown>[]) => {
             opts.onUpsert?.(rows);
             return Promise.resolve({ data: null, error: null });
@@ -136,6 +158,55 @@ describe('getSearchSlice', () => {
       p_seller_handle: 'shophandle',
       p_exclude_ids: ['v9'],
     });
+  });
+
+  it('a blocked VIDEO is passed to the ranking function as an exclusion', async () => {
+    let seenArgs: Record<string, unknown> | null = null;
+    const db = sourceOf({
+      rpcResult: [],
+      blocks: [{ subject_type: 'video', subject_id: 'v-blocked' }],
+      onRpcArgs: (args) => { seenArgs = args; },
+    });
+    await getSearchSlice(db, { ...PARAMS, query: 'sneakers' });
+    expect((seenArgs! as { p_exclude_ids: string[] }).p_exclude_ids).toContain('v-blocked');
+  });
+
+  it('a blocked SELLER is filtered from results even when their video ranks', async () => {
+    const db = sourceOf({
+      rpcResult: [{ video_id: 'v1', rank: 0.9 }],
+      videos: [videoRow()], // v1's seller is s1 (see videoRow fixture)
+      blocks: [{ subject_type: 'seller', subject_id: 's1' }],
+    });
+    const result = await getSearchSlice(db, { ...PARAMS, query: 'sneakers' });
+    expect(result.items).toEqual([]);
+  });
+
+  it("the session's already-served history is merged into the exclusion set server-side", async () => {
+    // This is what stops paging from stalling once the client's 200-id
+    // exclude window has scrolled past the earliest serves.
+    let seenArgs: Record<string, unknown> | null = null;
+    const db = sourceOf({
+      rpcResult: [],
+      served: [{ video_id: 'v-served-1' }, { video_id: 'v-served-2' }],
+      onRpcArgs: (args) => { seenArgs = args; },
+    });
+    await getSearchSlice(db, { ...PARAMS, query: 'sneakers', excludeIds: ['v-client'] });
+    const ids = (seenArgs! as { p_exclude_ids: string[] }).p_exclude_ids;
+    expect(ids).toEqual(expect.arrayContaining(['v-client', 'v-served-1', 'v-served-2']));
+  });
+
+  it('skips the served-history read entirely for the SSR placeholder session id', async () => {
+    let readServed = false;
+    const db = sourceOf({
+      rpcResult: [],
+      onServedRead: () => { readServed = true; },
+    });
+    await getSearchSlice(db, {
+      ...PARAMS,
+      query: 'sneakers',
+      sessionId: SSR_PLACEHOLDER_SESSION_ID,
+    });
+    expect(readServed).toBe(false);
   });
 
   it('never writes feed_slices for the SSR placeholder session id', async () => {

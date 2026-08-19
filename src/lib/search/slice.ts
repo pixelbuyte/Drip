@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadViewerBlocks } from '@/lib/feed/blocks';
 import { loadFeedItemDetails } from '@/lib/feed/item-details';
 import { recordSlice } from '@/lib/feed/slice';
 import { FEED_SLICE_SIZE, SSR_PLACEHOLDER_SESSION_ID, type FeedItem } from '@/lib/feed/types';
@@ -39,6 +40,27 @@ type SearchRow = { video_id: string; rank: number };
  */
 const SEARCH_LANE: FeedItem['lane'] = 'chrono';
 
+/** Mirrors the ranked path's served-history bound: the exclusion only
+ *  protects sessions as long as this window, so it must outlast any
+ *  realistic result set. */
+const SERVED_HISTORY_LIMIT = 1000;
+
+/**
+ * Everything this session has already been served, from feed_slices — the
+ * server-side complement to the client's capped exclude list. The SSR
+ * placeholder session id has no rows by construction (recordSlice skips it),
+ * so the read is skipped for it too.
+ */
+async function loadServedVideoIds(db: SupabaseClient, sessionId: string): Promise<string[]> {
+  if (sessionId === SSR_PLACEHOLDER_SESSION_ID) return [];
+  const { data } = await db
+    .from('feed_slices')
+    .select('video_id')
+    .eq('session_id', sessionId)
+    .limit(SERVED_HISTORY_LIMIT);
+  return (data ?? []).map((r) => r.video_id as string);
+}
+
 export async function getSearchSlice(
   db: SupabaseClient,
   params: SearchSliceParams
@@ -52,12 +74,32 @@ export async function getSearchSlice(
   // "browse everything" instead of "search for nothing".
   if (query.length === 0) return { items: [], exhausted: true };
 
+  // Blocks are a hard filter on EVERY serve path (spec 2.2): a viewer who
+  // said not_interested on a video or a seller must never see them again —
+  // "again" includes going looking. The naive feed and the ranked feed both
+  // enforce this; search dropping it silently would make the block button a
+  // lie exactly one search away. Loaded in parallel with the session's
+  // served history (below), since neither depends on the other.
+  const [blocks, servedIds] = await Promise.all([
+    loadViewerBlocks(db, params.anonId),
+    loadServedVideoIds(db, params.sessionId),
+  ]);
+
+  // The exclusion set the ranking function sees is the union of what the
+  // client sent (capped at its last 200 ids), what this SESSION has already
+  // been served (feed_slices knows all of it — this is what stops paging
+  // from stalling at ~220 results and falsely reporting "all caught up"
+  // while unseen matches remain), and the viewer's blocked videos.
+  const excludeIds = [
+    ...new Set([...params.excludeIds, ...servedIds, ...blocks.blockedVideos]),
+  ];
+
   const { data, error } = await db.rpc('search_feed_videos', {
     p_query: query,
     p_category_slug: params.categorySlug ?? null,
     p_seller_handle: params.sellerHandle ?? null,
     p_limit: limit,
-    p_exclude_ids: params.excludeIds,
+    p_exclude_ids: excludeIds,
   });
   if (error) throw new Error(`search query failed: ${error.message}`);
 
@@ -76,6 +118,10 @@ export async function getSearchSlice(
     // unpublished mid-request) — skip rather than show a broken item, same
     // posture as the ranked feed's own loadFeedItemDetails callers.
     if (!detail) continue;
+    // Seller-level blocks are filtered here rather than in SQL: the ranking
+    // function doesn't know the viewer, and the details row is the first
+    // place the seller id appears in this path.
+    if (blocks.blockedSellers.has(detail.seller.id)) continue;
     items.push({ ...detail, lane: SEARCH_LANE, position: items.length });
   }
 

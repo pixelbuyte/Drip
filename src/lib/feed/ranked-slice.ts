@@ -79,9 +79,13 @@ function one<T>(v: T | T[] | null | undefined): T | null {
 /** Generous bound on a single session's `feed_slices` history. `signals.ts`
  * only ever looks at the first 5-8 entries for diversity/fatigue, but
  * `seenSellerIds` (constraint 7, select.ts) needs every seller this SESSION
- * has ever shown — capped here rather than left unbounded, since the primary
- * key (session_id, video_id) makes this an efficient prefix scan either way. */
-const RECENT_CONTEXT_LIMIT = 300;
+ * has ever shown, and `servedVideoIds` (below) needs every VIDEO — capped
+ * here rather than left unbounded, since the primary key
+ * (session_id, video_id) makes this an efficient prefix scan either way.
+ * 1000, not 300: the served-history exclusion only protects sessions as long
+ * as this window, and the candidate pool itself caps at 500, so 1000 means
+ * the exclusion can never be the thing that runs out first. */
+const RECENT_CONTEXT_LIMIT = 1000;
 
 type RecentSliceRow = {
   video_id: string;
@@ -105,7 +109,7 @@ async function loadRecentContext(
   db: SupabaseClient,
   sessionId: string,
   poolByVideoId: ReadonlyMap<string, PoolVideo>
-): Promise<RecentContext> {
+): Promise<RecentContext & { servedVideoIds: Set<string> }> {
   const { data } = await db
     .from('feed_slices')
     .select('video_id, videos ( seller_id, category_id )')
@@ -117,8 +121,10 @@ async function loadRecentContext(
   const categoryIds: (string | null)[] = [];
   const priceCents: number[] = [];
   const seenSellerIds = new Set<string>();
+  const servedVideoIds = new Set<string>();
 
   for (const row of (data ?? []) as RecentSliceRow[]) {
+    servedVideoIds.add(row.video_id);
     const v = one(row.videos);
     if (!v) continue;
     seenSellerIds.add(v.seller_id);
@@ -134,7 +140,7 @@ async function loadRecentContext(
     }
   }
 
-  return { sellerIds, categoryIds, priceCents, seenSellerIds };
+  return { sellerIds, categoryIds, priceCents, seenSellerIds, servedVideoIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,12 +257,32 @@ export async function getRankedFeedSlice(
 
   const recentContext = await loadRecentContext(db, params.sessionId, poolByVideoId);
 
+  // Exclude the session's FULL served history, not just what the client sent:
+  // the client's exclude list is capped at its last 200 ids (and the route at
+  // 300), so past ~200 served videos the earliest — and highest-scoring —
+  // serves re-entered the candidate set. Once a page consisted entirely of
+  // re-serves, the shell deduped them all, saw nothing fresh with no cursor,
+  // and latched "you're all caught up" with real unseen inventory left
+  // (reproduced in simulation at pages ~31-55). feed_slices already knows
+  // everything this session was served; the exclusion set now does too, so
+  // an exhausted signal only fires when the pool is genuinely served out.
+  for (const id of recentContext.servedVideoIds) excludeSet.add(id);
+
+  // The rng seed must differ per viewer even when a caller passes the shared
+  // SSR placeholder session id (no current caller does — both SSR pages mint
+  // a real per-render id — but the constant still exists): seeding from a
+  // SHARED id made every cold-start visitor's slice byte-identical, since
+  // all their other scoring inputs (empty profile, empty recent context) are
+  // identical too.
+  const seedKey =
+    params.sessionId === SSR_PLACEHOLDER_SESSION_ID ? params.anonId : params.sessionId;
+
   // Generated once per request, not once per position: identical to the
   // simulation harness's own rationale (candidates.ts's docstring) — the
   // pool is stable for the life of one request, and already-served videos
   // are excluded via `viewerCtx.excludeIds` rather than by regenerating.
   const generated = generateCandidates(pool, viewerCtx, {
-    rng: mulberry32(fnv1a32(`gen:${params.sessionId}`)),
+    rng: mulberry32(fnv1a32(`gen:${seedKey}`)),
     now,
     targetSize: active.slice.candidatePoolSize,
     laneShares: active.laneShares,
@@ -280,7 +306,7 @@ export async function getRankedFeedSlice(
   );
 
   const result = select(scored, recentContext, {
-    rng: mulberry32(fnv1a32(`sel:${params.sessionId}:${offset}`)),
+    rng: mulberry32(fnv1a32(`sel:${seedKey}:${offset}`)),
     sliceSize: Math.max(0, Math.min(limit, active.slice.sliceSize)),
     freshFloor: active.slice.minFreshPerSlice,
     maxPerSeller: active.slice.maxPerSellerPerSlice,
