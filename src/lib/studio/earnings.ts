@@ -410,6 +410,18 @@ export type ReversalInput = {
    * guessed figure on a money screen is worse than an honest blank.
    */
   disputeFeeCents?: number | null;
+  /**
+   * True when the refund was issued WITH `refund_application_fee: true` — the
+   * application fee (Drip's commission AND the processing passthrough) came
+   * back from the platform to fund the refund, and the seller's transfer was
+   * reversed in full. The seller's loss on such a reversal is only a label
+   * they had already bought, NOT the processing fee — the platform ate that.
+   * This is exactly what the one automated refund path in this codebase (the
+   * oversell auto-refund in the Stripe webhook) does. Default false, which
+   * models a refund issued from the Stripe dashboard without returning the
+   * fee — the case the section's warning copy is about.
+   */
+  applicationFeeReturned?: boolean;
 };
 
 export type ReversalBreakdown = {
@@ -451,6 +463,7 @@ export type ReversalBreakdown = {
  */
 export function summarizeReversal(input: ReversalInput): ReversalBreakdown {
   const { order, kind } = input;
+  const feeReturned = input.applicationFeeReturned === true;
 
   const refundedItemCents = clamp(intCents(input.refundedItemCents), 0, order.grossCents);
   const refundedShippingCents = clamp(
@@ -461,11 +474,15 @@ export function summarizeReversal(input: ReversalInput): ReversalBreakdown {
   const refundedCents = refundedItemCents + refundedShippingCents;
 
   const keptItemCents = order.grossCents - refundedItemCents;
-  const dripFeeKeptCents = Math.min(
-    order.dripFeeCents,
-    dripCommissionCents(keptItemCents, order.dripFeeRatePct)
-  );
+  // When the application fee came back with the refund, nothing of the
+  // commission was kept from the seller either — the whole fee funded the
+  // buyer's refund, and the seller's transfer reversal covers the rest.
+  const dripFeeKeptCents = feeReturned
+    ? 0
+    : Math.min(order.dripFeeCents, dripCommissionCents(keptItemCents, order.dripFeeRatePct));
   const dripFeeReturnedCents = order.dripFeeCents - dripFeeKeptCents;
+  const processingKeptCents = feeReturned ? 0 : order.processingCents;
+  const processingReturnedCents = order.processingCents - processingKeptCents;
 
   const disputeFeeCents =
     kind === 'dispute'
@@ -474,8 +491,14 @@ export function summarizeReversal(input: ReversalInput): ReversalBreakdown {
         : null
       : null;
 
+  // On a full refund this reduces to -(processingKeptCents + labelCents +
+  // disputeFee): with the fee returned, only the label (if bought) is sunk.
   const netCents =
-    order.netCents - refundedCents + dripFeeReturnedCents - (disputeFeeCents ?? 0);
+    order.netCents -
+    refundedCents +
+    dripFeeReturnedCents +
+    processingReturnedCents -
+    (disputeFeeCents ?? 0);
 
   return {
     kind,
@@ -483,7 +506,7 @@ export function summarizeReversal(input: ReversalInput): ReversalBreakdown {
     refundedCents,
     dripFeeReturnedCents,
     dripFeeKeptCents,
-    processingKeptCents: order.processingCents,
+    processingKeptCents,
     labelCents: order.labelCents,
     disputeFeeCents,
     netCents,

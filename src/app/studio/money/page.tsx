@@ -93,6 +93,7 @@ type ModernOrderRow = {
   id: string;
   created_at: string | null;
   status: string | null;
+  amount_cents: number | null;
   subtotal_cents: number | null;
   shipping_cents: number | null;
   total_cents: number | null;
@@ -131,32 +132,53 @@ type OrderRow = {
 };
 
 const MODERN_COLUMNS =
-  'id, created_at, status, subtotal_cents, shipping_cents, total_cents, platform_fee_cents, label_url, refunded_at, disputed_at';
+  'id, created_at, status, amount_cents, subtotal_cents, shipping_cents, total_cents, platform_fee_cents, label_url, refunded_at, disputed_at';
 const LEGACY_COLUMNS = 'id, created_at, status, amount_cents, shipping_cents, label_url';
 
 function fromModern(row: ModernOrderRow): OrderRow {
+  const shippingCents = Number(row.shipping_cents ?? 0);
+  // subtotal_cents is the item subtotal when the writer recorded one. A row
+  // where it sits at the schema's DEFAULT 0 while money actually moved (the
+  // old webhook wrote only amount_cents) is NOT a free order — derive the
+  // items from the charge minus shipping instead. amount_cents is Stripe's
+  // amount_total, which always INCLUDES the shipping line item.
+  const recordedSubtotal = Number(row.subtotal_cents ?? 0);
+  const chargeCents = Number(row.amount_cents ?? row.total_cents ?? 0);
+  const itemSubtotalCents =
+    recordedSubtotal > 0 ? recordedSubtotal : Math.max(chargeCents - shippingCents, 0);
   return {
     id: row.id,
     createdAt: row.created_at,
     status: row.status,
-    itemSubtotalCents: Number(row.subtotal_cents ?? 0),
-    shippingChargedCents: Number(row.shipping_cents ?? 0),
+    itemSubtotalCents,
+    shippingChargedCents: shippingCents,
+    // platform_fee_cents is NOT NULL DEFAULT 0, so 0 is what an order shows
+    // when the writer never recorded the fee — not evidence a fee of $0.00
+    // was charged. A genuinely-zero recorded fee cannot occur on a nonzero
+    // charge (the processing passthrough alone is >= 30c), so 0 always means
+    // "unrecorded": fall back to the policy computation rather than
+    // rendering every fee line as $0.00 and overstating the seller's net.
     recordedApplicationFeeCents:
-      row.platform_fee_cents === null || row.platform_fee_cents === undefined
-        ? null
-        : Number(row.platform_fee_cents),
+      typeof row.platform_fee_cents === 'number' && row.platform_fee_cents > 0
+        ? row.platform_fee_cents
+        : null,
     hasLabel: Boolean(row.label_url),
     reversedAt: row.refunded_at ?? row.disputed_at ?? null,
   };
 }
 
 function fromLegacy(row: LegacyOrderRow): OrderRow {
+  const shippingCents = Number(row.shipping_cents ?? 0);
   return {
     id: row.id,
     createdAt: row.created_at,
     status: row.status,
-    itemSubtotalCents: Number(row.amount_cents ?? 0),
-    shippingChargedCents: Number(row.shipping_cents ?? 0),
+    // amount_cents is the FULL charge (the legacy checkout adds shipping as
+    // a line item), so the items are the charge minus shipping. Mapping the
+    // charge straight into itemSubtotalCents double-counted shipping into
+    // every gross, net, monthly total and tier figure.
+    itemSubtotalCents: Math.max(Number(row.amount_cents ?? 0) - shippingCents, 0),
+    shippingChargedCents: shippingCents,
     recordedApplicationFeeCents: null,
     hasLabel: Boolean(row.label_url),
     reversedAt: null,
@@ -165,28 +187,83 @@ function fromLegacy(row: LegacyOrderRow): OrderRow {
 
 type SupabaseClient = Awaited<ReturnType<typeof createServerClient_>>;
 
+/** PostgREST's codes for "that column does not exist" — the ONLY errors that
+ *  mean "pre-migration schema" rather than "something went wrong". */
+const UNDEFINED_COLUMN_CODES = new Set(['42703', 'PGRST204', 'PGRST100']);
+
+/** Supabase/PostgREST silently caps un-ranged selects at db-max-rows
+ *  (default 1000); an aggregate over a capped page renders as a confident
+ *  exact figure. Anything summed in JS must page until a short page. */
+const ORDERS_PAGE_SIZE = 1000;
+
+// The builder both shapes return: thenable, and supports .range() for paging.
+type OrdersBuilder = PromiseLike<{ data: unknown; error: unknown }> & {
+  range: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>;
+};
+
 /**
- * Fetch orders, tolerating the schema fork.
+ * Fetch orders, tolerating the schema fork — and ONLY the fork.
  *
- * The modern column set is tried first. A `null` result means the SELECT
- * itself failed — on today's production that is `column subtotal_cents does
- * not exist` — so the same window is re-read with the 00001 columns. An empty
- * array is a real answer and is returned as-is.
+ * The modern column set is tried first. The legacy re-read fires only when
+ * the modern SELECT failed with an undefined-column error, i.e. on the
+ * pre-migration schema. Any other failure (network blip, timeout, revoked
+ * grant) returns an empty list instead of switching shapes: the two shapes
+ * carry different fee semantics, and falling back on a transient error made
+ * the same order render different cents across two refreshes — exactly the
+ * inconsistency this screen exists to prevent.
+ *
+ * With `paged`, the window is read in ORDERS_PAGE_SIZE slices until a short
+ * page. Paged shapes must carry a deterministic .order() — range slicing
+ * without one can skip or repeat rows between pages.
  */
 async function loadOrders(
   supabase: SupabaseClient,
   userId: string,
-  shape: (q: ReturnType<SupabaseClient['from']>) => PromiseLike<{ data: unknown; error: unknown }>,
-  legacyShape: (
-    q: ReturnType<SupabaseClient['from']>
-  ) => PromiseLike<{ data: unknown; error: unknown }>
+  shape: (q: ReturnType<SupabaseClient['from']>) => OrdersBuilder,
+  legacyShape: (q: ReturnType<SupabaseClient['from']>) => OrdersBuilder,
+  paged = false
 ): Promise<OrderRow[]> {
   void userId;
-  const modern = await safe<ModernOrderRow[]>(shape(supabase.from('orders')));
-  if (modern !== null) return modern.map(fromModern);
 
-  const legacy = await safe<LegacyOrderRow[]>(legacyShape(supabase.from('orders')));
-  return (legacy ?? []).map(fromLegacy);
+  const fetchPage = async (
+    legacy: boolean,
+    from: number
+  ): Promise<{ rows: unknown[] | null; code: string }> => {
+    try {
+      const builder = (legacy ? legacyShape : shape)(supabase.from('orders'));
+      const { data, error } = await (paged
+        ? builder.range(from, from + ORDERS_PAGE_SIZE - 1)
+        : builder);
+      if (error) return { rows: null, code: (error as { code?: string }).code ?? '' };
+      return { rows: (data as unknown[]) ?? [], code: '' };
+    } catch {
+      return { rows: null, code: '' };
+    }
+  };
+
+  let legacy = false;
+  let page = await fetchPage(false, 0);
+  if (page.rows === null) {
+    if (!UNDEFINED_COLUMN_CODES.has(page.code)) return [];
+    legacy = true;
+    page = await fetchPage(true, 0);
+    if (page.rows === null) return [];
+  }
+
+  const out: OrderRow[] = [];
+  let rows: unknown[] = page.rows;
+  let offset = 0;
+  for (;;) {
+    for (const row of rows) {
+      out.push(legacy ? fromLegacy(row as LegacyOrderRow) : fromModern(row as ModernOrderRow));
+    }
+    if (!paged || rows.length < ORDERS_PAGE_SIZE) break;
+    offset += ORDERS_PAGE_SIZE;
+    const next = await fetchPage(legacy, offset);
+    if (next.rows === null) break; // partial data beats switching shapes mid-sum
+    rows = next.rows;
+  }
+  return out;
 }
 
 type PayoutStatus = {
@@ -279,18 +356,26 @@ async function loadMoney(): Promise<MoneyData | null> {
     loadOrders(
       supabase,
       userId,
+      // Ordered because this one PAGES: range slicing without a
+      // deterministic order can skip or repeat rows between pages, and this
+      // window feeds the monthly totals and the tier progress.
       (q) =>
         q
           .select(MODERN_COLUMNS)
           .eq('seller_id', userId)
           .in('status', counted)
-          .gte('created_at', lastMonthStartIso),
+          .gte('created_at', lastMonthStartIso)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true }),
       (q) =>
         q
           .select(LEGACY_COLUMNS)
           .eq('seller_id', userId)
           .in('status', counted)
           .gte('created_at', lastMonthStartIso)
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true }),
+      true
     ),
     loadOrders(
       supabase,
@@ -381,6 +466,15 @@ async function loadMoney(): Promise<MoneyData | null> {
       refundedItemCents: order.grossCents,
       refundedShippingCents: order.shippingChargedCents,
       disputeFeeCents: null,
+      // The oversell auto-refund — the ONLY code path that can produce a
+      // 'refunded' row today — refunds with refund_application_fee: true,
+      // returning the whole fee (commission AND processing) to fund the
+      // refund. The seller's loss on such a reversal is $0 plus any label;
+      // charging them a processing-fee loss they never bore was the bug.
+      // Disputes do NOT return the fee. If a manual-refund path (dashboard,
+      // without returning the fee) ever produces rows, it needs a recorded
+      // flag — there is no column that distinguishes the two yet.
+      applicationFeeReturned: row.status !== 'disputed',
     });
   });
 
@@ -870,14 +964,16 @@ function ReversalLog({ reversals }: { reversals: ReversalBreakdown[] }) {
 
       <div className="mt-3 rounded-card border border-hairline p-4 md:p-5">
         <p className="text-[14px] leading-[1.6] text-muted">
-          <span className="font-bold text-ink">Stripe keeps its processing fee on a refund.</span>{' '}
-          Drip returns its commission in full — every cent of it — but the{' '}
-          <span data-num>{pct(FEE_RATES.processingPct, 1)}</span> +{' '}
+          <span className="font-bold text-ink">
+            When Drip refunds a buyer automatically, you lose nothing but the label.
+          </span>{' '}
+          An automatic refund (two buyers racing for the last unit) returns Drip&rsquo;s
+          commission <em>and</em> the card-processing fee to fund it, so the sale nets out to
+          zero — only a shipping label you had already bought stays spent. A refund issued any
+          other way is different: the <span data-num>{pct(FEE_RATES.processingPct, 1)}</span> +{' '}
           <span data-num>{money(FEE_RATES.processingFixedCents)}</span> the card networks charged
-          to move the money is gone, and refunding does not bring it back. So a fully refunded
-          order leaves you down by that fee, plus any label you had already bought. That is not
-          Drip&rsquo;s policy and we cannot waive it — but you should never find it out from a
-          bank statement.
+          to move the money is gone, and refunding does not bring it back. You should never find
+          either version out from a bank statement.
         </p>
         <p className="mt-2.5 text-[14px] leading-[1.6] text-muted">
           A dispute works the same way, and Stripe adds its own dispute fee on top. Stripe sets

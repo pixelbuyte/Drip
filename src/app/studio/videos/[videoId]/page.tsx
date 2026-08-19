@@ -250,6 +250,7 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
     laneFresh,
     laneSocial,
     laneRandom,
+    laneChrono,
     sharedOpens,
     myShipping,
   ] = await Promise.all([
@@ -290,6 +291,10 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
     eventCount((q) => q.eq('video_id', video.id).eq('event_type', 'impression').eq('lane', 'fresh').neq('surface', 'shared_link')),
     eventCount((q) => q.eq('video_id', video.id).eq('event_type', 'impression').eq('lane', 'social').neq('surface', 'shared_link')),
     eventCount((q) => q.eq('video_id', video.id).eq('event_type', 'impression').eq('lane', 'random').neq('surface', 'shared_link')),
+    // The naive chronological feed stamps 'chrono' — today, 100% of feed
+    // impressions. Omitting it made this section report "Nothing served yet"
+    // under a funnel full of impressions.
+    eventCount((q) => q.eq('video_id', video.id).eq('event_type', 'impression').eq('lane', 'chrono').neq('surface', 'shared_link')),
     eventCount((q) => q.eq('video_id', video.id).eq('event_type', 'impression').eq('surface', 'shared_link')),
     safe<ShippingRow[]>(
       supabase
@@ -382,6 +387,7 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
     fresh: laneFresh ?? 0,
     social: laneSocial ?? 0,
     random: laneRandom ?? 0,
+    chrono: laneChrono ?? 0,
     shared: sharedOpens ?? 0,
   };
 

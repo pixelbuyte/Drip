@@ -792,3 +792,95 @@ describe('sums', () => {
     expect(sumNetCents([{ netCents: 100 }, { netCents: Number.NaN }, { netCents: 50 }])).toBe(150);
   });
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE REVIEW FIXTURE — $40.00 item + $6.00 shipping, end to end
+   The adversarial money review executed this exact order through the OLD
+   adapters and got "You keep $52.00" for a $46.00 charge whose true seller
+   receipt is $44.37. These lock the corrected figures.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+describe('the $40 + $6 review fixture', () => {
+  const base: OrderEarningsInput = {
+    orderRef: '#DRP-REVIEW',
+    soldAt: '2026-08-19T00:00:00Z',
+    itemSubtotalCents: 4_000,
+    shippingChargedCents: 600,
+    labelCents: null,
+    dripRatePct: 0, // founding program
+  };
+
+  it('with the RECORDED fee (163c, what Stripe actually moved): net is exactly $44.37', () => {
+    const order = buildOrderEarnings({ ...base, recordedApplicationFeeCents: 163 });
+    expect(order.chargeTotalCents).toBe(4_600); // the charge — never $52.00
+    expect(order.applicationFeeCents).toBe(163);
+    expect(order.netCents).toBe(4_437);
+  });
+
+  it('unrecorded fee falls back to policy math and lands on the same cents', () => {
+    // round(4600 * 2.9%) + 30 = 133 + 30 = 163; commission 0 at the founding rate.
+    const order = buildOrderEarnings({ ...base, recordedApplicationFeeCents: null });
+    expect(order.processingCents).toBe(163);
+    expect(order.dripFeeCents).toBe(0);
+    expect(order.netCents).toBe(4_437);
+  });
+});
+
+describe('summarizeReversal — the oversell auto-refund returns the application fee', () => {
+  const order = buildOrderEarnings({
+    orderRef: '#DRP-OVERSELL',
+    soldAt: '2026-08-19T00:00:00Z',
+    itemSubtotalCents: 4_000,
+    shippingChargedCents: 600,
+    labelCents: null,
+    dripRatePct: 6,
+    recordedApplicationFeeCents: 403, // 240 commission + 163 processing
+  });
+
+  it('the seller nets exactly zero — no processing-fee loss they never bore', () => {
+    const refund = summarizeReversal({
+      kind: 'refund',
+      order,
+      refundedItemCents: order.grossCents,
+      refundedShippingCents: order.shippingChargedCents,
+      applicationFeeReturned: true,
+    });
+    expect(refund.processingKeptCents).toBe(0);
+    expect(refund.dripFeeKeptCents).toBe(0);
+    expect(refund.dripFeeReturnedCents).toBe(order.dripFeeCents);
+    expect(refund.netCents).toBe(0);
+  });
+
+  it('only a label already bought stays sunk', () => {
+    const withLabel = buildOrderEarnings({
+      orderRef: '#DRP-OVERSELL',
+      soldAt: '2026-08-19T00:00:00Z',
+      itemSubtotalCents: 4_000,
+      shippingChargedCents: 600,
+      labelCents: 542,
+      dripRatePct: 6,
+      recordedApplicationFeeCents: 403,
+    });
+    const refund = summarizeReversal({
+      kind: 'refund',
+      order: withLabel,
+      refundedItemCents: withLabel.grossCents,
+      refundedShippingCents: withLabel.shippingChargedCents,
+      applicationFeeReturned: true,
+    });
+    expect(refund.netCents).toBe(-542);
+    expect(refund.netCents).toBe(-(refund.processingKeptCents + (refund.labelCents ?? 0)));
+  });
+
+  it('a refund WITHOUT the fee returned keeps the old, harsher model', () => {
+    const refund = summarizeReversal({
+      kind: 'refund',
+      order,
+      refundedItemCents: order.grossCents,
+      refundedShippingCents: order.shippingChargedCents,
+      // applicationFeeReturned omitted -> false
+    });
+    expect(refund.processingKeptCents).toBe(order.processingCents);
+    expect(refund.netCents).toBe(-order.processingCents);
+  });
+});

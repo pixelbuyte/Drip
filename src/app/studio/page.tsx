@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createServerClient_ } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { DRIP_FEE_BPS, getStripe } from '@/lib/stripe';
+import { DRIP_FEE_BPS, applicationFeeAmount, getStripe } from '@/lib/stripe';
 import {
   COUNTED_ORDER_STATUSES,
   FOUNDING_SELLER_CAP,
@@ -127,13 +127,36 @@ function adminOrNull(): ReturnType<typeof createAdminClient> | null {
 type OrderRow = {
   created_at: string | null;
   status: string | null;
+  amount_cents: number | null;
+  shipping_cents: number | null;
   total_cents: number | null;
   platform_fee_cents: number | null;
 };
 
-/** What actually lands in the seller's Stripe balance for one order. */
+/**
+ * What actually lands in the seller's Stripe balance for one order.
+ *
+ * total_cents and platform_fee_cents are NOT NULL DEFAULT 0 and were never
+ * written by the original webhook — reading them naively rendered every real
+ * sale as "$0.00 earned, after fees" forever. The charge is total_cents when
+ * a writer recorded one, else amount_cents (Stripe's amount_total — present
+ * on every order both schemas ever wrote). A zero platform_fee_cents on a
+ * nonzero charge means UNRECORDED, not free (the processing passthrough
+ * alone is >= 30c), so the fee falls back to the live policy computation —
+ * the same discipline the money screen applies, so the two can never
+ * disagree about the same order.
+ */
 function netCents(order: OrderRow): number {
-  return (order.total_cents ?? 0) - (order.platform_fee_cents ?? 0);
+  const recordedTotal = Number(order.total_cents ?? 0);
+  const charge = recordedTotal > 0 ? recordedTotal : Number(order.amount_cents ?? 0);
+  if (charge <= 0) return 0;
+  const shipping = Number(order.shipping_cents ?? 0);
+  const recordedFee = Number(order.platform_fee_cents ?? 0);
+  const fee =
+    recordedFee > 0
+      ? recordedFee
+      : applicationFeeAmount(Math.max(charge - shipping, 0), charge);
+  return charge - Math.min(fee, charge);
 }
 
 type PulseData = {
@@ -266,7 +289,18 @@ async function loadPulse(): Promise<PulseData | null> {
         impressions: Number(stats?.impressions_all ?? 0),
         taps: Number(stats?.product_taps_all ?? 0),
         sold: Number(stats?.purchases_all ?? 0),
-        budgetDelivered: Number(stats?.exploration_impressions ?? 0),
+        // exploration_impressions only counts lane='fresh' impressions — the
+        // ranked pipeline's exploration lane. With ranking dark (100% of
+        // traffic on the naive chronological feed, lane 'chrono'), that
+        // counter can NEVER move, and the guarantee bar sat at 0/500 directly
+        // under a visibly climbing "Seen" figure — a promise that reads as
+        // broken. Until the ranked path serves traffic, real impressions ARE
+        // the delivery; take whichever counter is further along so the bar is
+        // honest in both regimes and never regresses when ranking ramps up.
+        budgetDelivered: Math.max(
+          Number(stats?.exploration_impressions ?? 0),
+          Math.min(Number(stats?.impressions_all ?? 0), REACH_GUARANTEE_IMPRESSIONS)
+        ),
         budgetTotal: REACH_GUARANTEE_IMPRESSIONS,
       };
     });
@@ -280,15 +314,27 @@ async function loadPulse(): Promise<PulseData | null> {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)
   );
 
+  // Modern columns first; a pre-migration schema (no total_cents) fails the
+  // whole select, so re-read the columns 00001 has. Legacy rows compute their
+  // fee via the same policy fallback netCents applies to unrecorded fees.
   const orders =
     (await safe<OrderRow[]>(
       supabase
         .from('orders')
-        .select('created_at, status, total_cents, platform_fee_cents')
+        .select('created_at, status, amount_cents, shipping_cents, total_cents, platform_fee_cents')
         .eq('seller_id', userId)
         .in('status', [...COUNTED_ORDER_STATUSES])
         .gte('created_at', lastMonthStart.toISOString())
-    )) ?? [];
+    )) ??
+    (await safe<OrderRow[]>(
+      supabase
+        .from('orders')
+        .select('created_at, status, amount_cents, shipping_cents')
+        .eq('seller_id', userId)
+        .in('status', [...COUNTED_ORDER_STATUSES])
+        .gte('created_at', lastMonthStart.toISOString())
+    )) ??
+    [];
 
   let earnedCentsThisMonth = 0;
   let orderCount = 0;
@@ -520,6 +566,13 @@ function ReachCard({ video }: { video: LiveVideo }) {
   const progress = progressPct(video.budgetDelivered, video.budgetTotal);
   const complete = video.budgetDelivered >= video.budgetTotal;
   const remaining = Math.max(0, video.budgetTotal - video.budgetDelivered);
+  // "Coming within 48h of posting" is only true while the 48h are still
+  // running. Past the window this card used to keep making the promise in
+  // the present tense on videos days old — worse than no promise. An
+  // unparseable postedAt (null hours) counts as closed: no timestamp, no
+  // present-tense promise.
+  const hours = hoursSince(video.postedAt);
+  const windowOpen = hours !== null && hours < REACH_GUARANTEE_WINDOW_HOURS;
 
   return (
     <article className="rounded-card bg-card p-5 shadow-card">
@@ -572,7 +625,9 @@ function ReachCard({ video }: { video: LiveVideo }) {
         <p className="mt-2.5 text-[13px] leading-[1.5] text-muted">
           {complete
             ? 'First-day reach guarantee delivered in full. Everything after this was earned.'
-            : `First-day reach guarantee. ${count(remaining)} more coming within ${REACH_GUARANTEE_WINDOW_HOURS}h of posting, whether or not anyone follows you.`}
+            : windowOpen
+              ? `First-day reach guarantee. ${count(remaining)} more coming within ${REACH_GUARANTEE_WINDOW_HOURS}h of posting, whether or not anyone follows you.`
+              : `First-day window closed at ${count(video.budgetDelivered)} of ${count(video.budgetTotal)}. Everything from here on is earned reach.`}
         </p>
       </div>
 
