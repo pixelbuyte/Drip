@@ -1,0 +1,21 @@
+-- Drop link_anon_identity. Migration 00010 introduced claim_anon_identity to
+-- close an identity-seizure hole, documented it as the replacement, and then
+-- left the vulnerable function in place with its service_role grant intact.
+--
+-- The hole: link_anon_identity's null-canonical branch repointed a
+-- viewer_identities row without checking whether auth_user_id was already set
+-- to a different account. Signing in on a shared or borrowed device therefore
+-- grafted the previous person's browsing history — and the affinity profile
+-- built from it — onto the new account.
+--
+-- The replacement shipped, but /api/session/link was never migrated to it, so
+-- every production call still went through the unsafe path. Deleting the
+-- function is what makes the migration actually take effect: with the caller
+-- switched to claim_anon_identity, a future caller cannot reintroduce the
+-- vulnerability by reaching for the older name, because the name is gone
+-- rather than merely deprecated.
+--
+-- Safe to drop unconditionally: claim_anon_identity(uuid, uuid) is the only
+-- supported entry point, and it is idempotent for the same user.
+
+DROP FUNCTION IF EXISTS public.link_anon_identity(uuid, uuid);
