@@ -98,8 +98,9 @@
 -- SECTION 1 -- replay of 00003: video upload lifecycle, variants, discounts
 -- =============================================================================
 
--- 00007:322 reads d.mux_upload_id and 00007:346 reads d.variants. Both are
--- plain 00003 columns that production never got.
+-- 00007's backfill into public.videos reads d.mux_upload_id, and its backfill
+-- into public.products reads d.variants. Both are plain 00003 columns that
+-- production never got.
 ALTER TABLE public.drops ADD COLUMN IF NOT EXISTS mux_upload_id TEXT;
 ALTER TABLE public.drops ADD COLUMN IF NOT EXISTS variants JSONB;
 
@@ -168,8 +169,8 @@ ALTER TABLE public.orders DROP CONSTRAINT IF EXISTS orders_status_check;
 ALTER TABLE public.orders ADD CONSTRAINT orders_status_check
   CHECK (status IN ('paid', 'label_created', 'shipped', 'delivered', 'refunded'));
 
--- Sold-out waitlist. 00007:426-434 repoints this table's drop_id at
--- products.id, so the table has to be here first.
+-- Sold-out waitlist. 00007 repoints this table's drop_id at products.id
+-- (ADD COLUMN product_id / DROP COLUMN drop_id), so it has to exist first.
 CREATE TABLE IF NOT EXISTS public.waitlist_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   drop_id UUID NOT NULL REFERENCES public.drops(id) ON DELETE CASCADE,
@@ -199,7 +200,7 @@ CREATE POLICY "waitlist_seller_read" ON public.waitlist_entries
 -- SECTION 3 -- replay of 00005: moderation reports
 -- =============================================================================
 
--- 00007:436-442 repoints this table at videos/products, so it has to exist.
+-- 00007 repoints this table at videos/products, so it has to exist first.
 CREATE TABLE IF NOT EXISTS public.reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   drop_id UUID NOT NULL REFERENCES public.drops(id) ON DELETE CASCADE,
@@ -226,7 +227,7 @@ ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
 -- image-only listing, which 00001's lifecycle had no way to express and
 -- 00003's ('processing' -> 'active' when the video is ready) forbids.
 --
--- This is not cosmetic. 00007:319-330 backfills public.videos with
+-- This is not cosmetic. 00007's videos backfill maps drop status with
 --     CASE d.status WHEN 'active' THEN 'live' ... END
 -- and videos carries
 --     CONSTRAINT videos_live_has_playback
@@ -256,10 +257,10 @@ UPDATE public.drops
 
 
 -- =============================================================================
--- SECTION 5 -- charges_enabled, readable from profiles WITHOUT storing it there
+-- SECTION 5 -- reading charges_enabled WITHOUT putting it back on profiles
 -- =============================================================================
 --
--- 00007:499-504 creates:
+-- 00007's products_public_read_sellable policy was originally written as:
 --
 --     CREATE POLICY products_public_read_sellable ON public.products
 --       FOR SELECT TO anon USING (

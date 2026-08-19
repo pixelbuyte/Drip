@@ -57,15 +57,62 @@ export const dynamic = 'force-dynamic';
  * throws for the third, so both paths are swallowed here.
  */
 async function safe<T>(
-  query: PromiseLike<{ data: T | null; error: unknown }>
+  query: PromiseLike<{ data: unknown; error: unknown }>
 ): Promise<T | null> {
   try {
     const { data, error } = await query;
-    return error ? null : data;
+    return error ? null : ((data ?? null) as T | null);
   } catch {
     return null;
   }
 }
+
+/**
+ * Row shapes, declared by hand.
+ *
+ * There is no generated `Database` type in this project, so an untyped
+ * `from('videos')` infers `never` and every field access becomes an error.
+ * Writing the shapes out is better than casting to `any` anyway: these are
+ * the exact columns 00007-00011 define, so a column that gets renamed during
+ * the schema reconciliation shows up here as a compile error instead of as
+ * `undefined` at runtime.
+ */
+type ProfileRow = {
+  id: string;
+  handle: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  created_at: string | null;
+};
+
+type PaymentsRow = {
+  stripe_account_id: string | null;
+  charges_enabled: boolean | null;
+  from_address: unknown;
+};
+
+type VideoRow = {
+  id: string;
+  caption: string | null;
+  published_at: string | null;
+};
+
+type StatRow = {
+  video_id: string;
+  impressions_all: number | null;
+  product_taps_all: number | null;
+  purchases_all: number | null;
+  exploration_impressions: number | null;
+};
+
+type LinkRow = { video_id: string; product_id: string; position: number | null };
+
+type ProductRow = {
+  id: string;
+  title: string;
+  inventory_count: number | null;
+  status: string | null;
+};
 
 /** Service-role client, or null when the key is not configured. */
 function adminOrNull(): ReturnType<typeof createAdminClient> | null {
@@ -115,14 +162,14 @@ async function loadPulse(): Promise<PulseData | null> {
   // has a public read policy, and the Stripe id plus the seller's home
   // address were moved off it deliberately.
   const [profile, payments] = await Promise.all([
-    safe(
+    safe<ProfileRow>(
       supabase
         .from('profiles')
         .select('id, handle, display_name, avatar_url, created_at')
         .eq('id', userId)
         .maybeSingle()
     ),
-    safe(
+    safe<PaymentsRow>(
       supabase
         .from('seller_payments')
         .select('stripe_account_id, charges_enabled, from_address')
@@ -143,7 +190,7 @@ async function loadPulse(): Promise<PulseData | null> {
 
   // ── Live videos and their reach-guarantee progress ──────────────────────
   const videoRows =
-    (await safe(
+    (await safe<VideoRow[]>(
       supabase
         .from('videos')
         .select('id, caption, published_at')
@@ -163,7 +210,7 @@ async function loadPulse(): Promise<PulseData | null> {
   const admin = adminOrNull();
   const statRows =
     videoIds.length > 0 && admin
-      ? ((await safe(
+      ? ((await safe<StatRow[]>(
           admin
             .from('video_stats')
             .select(
@@ -173,13 +220,13 @@ async function loadPulse(): Promise<PulseData | null> {
         )) ?? [])
       : [];
 
-  const statsById = new Map(statRows.map((s) => [s.video_id as string, s]));
+  const statsById = new Map(statRows.map((s) => [s.video_id, s]));
 
   // Titles and stock, for videos whose caption is empty and for the
   // "selling something sold out" check.
   const links =
     videoIds.length > 0
-      ? ((await safe(
+      ? ((await safe<LinkRow[]>(
           supabase
             .from('video_products')
             .select('video_id, product_id, position')
@@ -188,10 +235,10 @@ async function loadPulse(): Promise<PulseData | null> {
         )) ?? [])
       : [];
 
-  const productIds = [...new Set(links.map((l) => l.product_id as string))];
+  const productIds = [...new Set(links.map((l) => l.product_id))];
   const productRows =
     productIds.length > 0
-      ? ((await safe(
+      ? ((await safe<ProductRow[]>(
           supabase
             .from('products')
             .select('id, title, inventory_count, status')
@@ -199,29 +246,30 @@ async function loadPulse(): Promise<PulseData | null> {
         )) ?? [])
       : [];
 
-  const productsById = new Map(productRows.map((p) => [p.id as string, p]));
-  const firstProductByVideo = new Map<string, (typeof productRows)[number]>();
+  const productsById = new Map(productRows.map((p) => [p.id, p]));
+  const firstProductByVideo = new Map<string, ProductRow>();
   for (const link of links) {
-    const vid = link.video_id as string;
-    if (firstProductByVideo.has(vid)) continue;
-    const product = productsById.get(link.product_id as string);
-    if (product) firstProductByVideo.set(vid, product);
+    if (firstProductByVideo.has(link.video_id)) continue;
+    const product = productsById.get(link.product_id);
+    if (product) firstProductByVideo.set(link.video_id, product);
   }
 
-  const liveVideos: LiveVideo[] = videoRows.map((v) => {
-    const stats = statsById.get(v.id);
-    const fallbackTitle = firstProductByVideo.get(v.id)?.title;
-    return {
-      videoId: v.id,
-      title: v.caption?.trim() || fallbackTitle || 'Untitled video',
-      postedAt: v.published_at as string,
-      impressions: Number(stats?.impressions_all ?? 0),
-      taps: Number(stats?.product_taps_all ?? 0),
-      sold: Number(stats?.purchases_all ?? 0),
-      budgetDelivered: Number(stats?.exploration_impressions ?? 0),
-      budgetTotal: REACH_GUARANTEE_IMPRESSIONS,
-    };
-  });
+  const liveVideos: LiveVideo[] = videoRows
+    .filter((v): v is VideoRow & { published_at: string } => Boolean(v.published_at))
+    .map((v) => {
+      const stats = statsById.get(v.id);
+      const fallbackTitle = firstProductByVideo.get(v.id)?.title;
+      return {
+        videoId: v.id,
+        title: v.caption?.trim() || fallbackTitle || 'Untitled video',
+        postedAt: v.published_at,
+        impressions: Number(stats?.impressions_all ?? 0),
+        taps: Number(stats?.product_taps_all ?? 0),
+        sold: Number(stats?.purchases_all ?? 0),
+        budgetDelivered: Number(stats?.exploration_impressions ?? 0),
+        budgetTotal: REACH_GUARANTEE_IMPRESSIONS,
+      };
+    });
 
   // ── Money ───────────────────────────────────────────────────────────────
   // Month boundaries are UTC; monthLabel() reads the same instant, so the
@@ -233,7 +281,7 @@ async function loadPulse(): Promise<PulseData | null> {
   );
 
   const orders =
-    (await safe(
+    (await safe<OrderRow[]>(
       supabase
         .from('orders')
         .select('created_at, status, total_cents, platform_fee_cents')
@@ -246,7 +294,7 @@ async function loadPulse(): Promise<PulseData | null> {
   let orderCount = 0;
   let lastMonthCents = 0;
 
-  for (const order of orders as OrderRow[]) {
+  for (const order of orders) {
     if (!order.created_at) continue;
     const at = Date.parse(order.created_at);
     if (Number.isNaN(at)) continue;
@@ -365,8 +413,8 @@ async function loadPayout(
 function buildTodos(
   seller: StudioSeller,
   liveVideos: LiveVideo[],
-  links: Array<{ video_id: string; product_id: string }>,
-  productsById: Map<string, { id: string; title: string; inventory_count: number | null; status: string | null }>
+  links: LinkRow[],
+  productsById: Map<string, ProductRow>
 ): Todo[] {
   const todos: Todo[] = [];
   const liveIds = new Set(liveVideos.map((v) => v.videoId));
