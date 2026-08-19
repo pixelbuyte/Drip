@@ -48,6 +48,32 @@ export const SELECTION = {
   FRESH_CEILING: 6,
   /** Impressions at which a rate is fully trusted by the evidence gate. */
   EVIDENCE_THRESHOLD: 100,
+  /**
+   * Spec 6.6, explore vs exploit. SOFTMAX_TEMPERATURE is the exploration dial,
+   * and these two numbers turn it from a constant into a function of how much
+   * the platform actually knows about a viewer:
+   *
+   *   uncertainty = 1 - min(1, engagedEvents / UNCERTAINTY_HORIZON_EVENTS)
+   *   T           = SOFTMAX_TEMPERATURE * (1 + MAX_EXPLORATION_WIDENING * uncertainty)
+   *
+   * A brand-new viewer gets T = 0.12 — a wide, exploratory feed. A viewer with
+   * 200+ engaged events gets T = 0.08, tight and confident. That is the whole
+   * mechanism behind "the algorithm got good after a week": nothing is trained
+   * or fitted, it is arithmetic over a counter the caller already has. See
+   * `adaptiveTemperature` in select.ts.
+   */
+  UNCERTAINTY_HORIZON_EVENTS: 200,
+  /** Fractional widening of the temperature at zero evidence: 0.08 -> 0.12. */
+  MAX_EXPLORATION_WIDENING: 0.5,
+  /**
+   * Spec 6.6's second half: one slot in every 20 goes to a uniformly random
+   * eligible video, with no scoring at all. It looks like waste. It is how you
+   * discover that a viewer who has only ever bought jewelry will also buy
+   * ceramics — a preference no amount of exploiting the existing model could
+   * ever surface. OFF by default in `select` (see SelectOptions.randomSlots),
+   * so existing simulation runs stay reproducible.
+   */
+  RANDOM_SLOT_INTERVAL: 20,
 } as const;
 
 // ---------------------------------------------------------------------------

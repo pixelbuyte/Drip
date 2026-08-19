@@ -37,3 +37,10 @@ export * from './session';
 
 // Measurement — the guardrails a simulation run is judged against.
 export * from './guardrails';
+
+// Adapters — the only impure-adjacent files here, and even these never throw
+// on the request path: each loads its DB-backed config and falls back to a
+// shipped default rather than failing the feed over a missing refinement.
+export * from './medians';
+export * from './weights';
+export * from './bucket';

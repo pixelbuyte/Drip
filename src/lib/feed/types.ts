@@ -70,6 +70,16 @@ export type FeedResponse = {
   nextBefore: string | null;
 };
 
+/**
+ * The SSR page's throwaway session id — "the client owns session identity;
+ * this first render only needs content, and the shell re-requests with its
+ * real session id" (see `feed/page.tsx`). Every anonymous visitor's first
+ * render shares this same value, so nothing may be written to `feed_slices`
+ * keyed on it: that would collide every visitor's SSR slice into one
+ * (session_id, video_id) primary key.
+ */
+export const SSR_PLACEHOLDER_SESSION_ID = '00000000-0000-0000-0000-000000000000';
+
 export const FEED_SLICE_SIZE = 20;
 /** Fetch the next slice when the viewer reaches this index of the buffer. */
 export const FEED_PREFETCH_AT = 15;

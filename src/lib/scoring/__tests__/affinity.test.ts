@@ -5,18 +5,41 @@ import {
   AFFINITY_CAP,
   AFFINITY_DAILY_RETENTION,
   EVENT_WEIGHTS,
+  NEGATIVE_SELLER_WEIGHTS,
+  NEGATIVE_SIGNAL_TYPES,
+  NEIGHBOUR_SUPPRESSION_DAYS,
+  NEIGHBOUR_SUPPRESSION_K,
+  NO_NEIGHBOURS,
+  REFUND_SUPPRESSION_DAYS,
   SELLER_BLOCK_DAYS,
+  SUPPRESSION_RULES,
+  UNFOLLOW_SUPPRESSION_DAYS,
+  activeSuppressions,
+  applyAffinityDeltas,
   applyEvents,
+  applyNegativeSignals,
   blockSellerFrom,
   daysElapsedBetween,
   decayAffinity,
+  findSuppression,
+  isNegativeSignalType,
   isSellerBlocked,
+  isSuppressed,
+  isSuppressionActive,
+  mergeSuppressions,
   normalizeWithCap,
+  revocationForRefollow,
+  revokeSuppressions,
+  suppressionFromSellerBlock,
   updateViewerAffinity,
+  updateViewerAffinityWithSignals,
   watchEventType,
   type AffinityEvent,
   type AffinityEventType,
   type AffinityMap,
+  type NeighbourProvider,
+  type Suppression,
+  type ViewerEvent,
 } from '../affinity';
 import { mulberry32 } from '../rng';
 import type { ViewerProfile } from '../types';
@@ -557,5 +580,1138 @@ describe('updateViewerAffinity', () => {
     const a = updateViewerAffinity(PROFILE, events, 7, NOW);
     const b = updateViewerAffinity(PROFILE, events, 7, NOW);
     expect(a).toEqual(b);
+  });
+});
+
+// ===========================================================================
+// SPEC 6.5 — NEGATIVE SIGNALS THAT ACTUALLY BITE
+// ===========================================================================
+
+const VIEWER = 'viewer-a';
+const OTHER_VIEWER = 'viewer-b';
+
+const PLUS_7D = new Date('2026-01-08T00:00:00.000Z');
+const PLUS_14D = new Date('2026-01-15T00:00:00.000Z');
+const PLUS_30D = new Date('2026-01-31T00:00:00.000Z');
+
+const at = (iso: string): Date => new Date(iso);
+const msBefore = (d: Date): Date => new Date(d.getTime() - 1);
+const msAfter = (d: Date): Date => new Date(d.getTime() + 1);
+
+/** n synthetic neighbour ids. */
+const neighbourIds = (n: number, prefix = 'nb'): string[] =>
+  Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+
+/** A well-behaved provider: honours k itself, as a real ANN index would. */
+const indexOf =
+  (ids: readonly string[]): NeighbourProvider =>
+  (_videoId, k) =>
+    ids.slice(0, k);
+
+/** A badly-behaved provider: ignores k and returns whatever it likes. */
+const rawProvider =
+  (ids: readonly string[]): NeighbourProvider =>
+  () =>
+    ids;
+
+const scoped = (rows: readonly Suppression[], scope: Suppression['scope']): Suppression[] =>
+  rows.filter((r) => r.scope === scope);
+
+const profileWith = (sellerAffinity: AffinityMap): ViewerProfile => ({
+  ...PROFILE,
+  sellerAffinity,
+});
+
+// ---------------------------------------------------------------------------
+// The tables
+// ---------------------------------------------------------------------------
+
+describe('6.5 — the weight tables are disjoint', () => {
+  it('NEGATIVE_SELLER_WEIGHTS is only the numbers 2.7 does not already own', () => {
+    expect(NEGATIVE_SELLER_WEIGHTS).toEqual({
+      unfollow: -5,
+      refund_requested: -4,
+      dispute_filed: 0,
+    });
+  });
+
+  it('no signal type carries a weight in both tables', () => {
+    for (const key of Object.keys(NEGATIVE_SELLER_WEIGHTS)) {
+      expect(Object.prototype.hasOwnProperty.call(EVENT_WEIGHTS, key)).toBe(false);
+    }
+  });
+
+  it('the two overlapping types keep their 2.7 weights and only their 2.7 weights', () => {
+    expect(EVENT_WEIGHTS.not_interested).toBe(-8);
+    expect(EVENT_WEIGHTS.fast_skip).toBe(-1.5);
+    expect(Object.prototype.hasOwnProperty.call(NEGATIVE_SELLER_WEIGHTS, 'not_interested')).toBe(
+      false
+    );
+    expect(Object.prototype.hasOwnProperty.call(NEGATIVE_SELLER_WEIGHTS, 'fast_skip')).toBe(false);
+  });
+
+  it('NEGATIVE_SIGNAL_TYPES is the whole 6.5 table minus the session-mode row', () => {
+    expect([...NEGATIVE_SIGNAL_TYPES]).toEqual([
+      'not_interested',
+      'fast_skip',
+      'unfollow',
+      'refund_requested',
+      'dispute_filed',
+    ]);
+    for (const t of NEGATIVE_SIGNAL_TYPES) expect(isNegativeSignalType(t)).toBe(true);
+    expect(isNegativeSignalType('purchase')).toBe(false);
+    expect(isNegativeSignalType(undefined)).toBe(false);
+  });
+
+  it('the suppression durations are the spec durations', () => {
+    expect(SUPPRESSION_RULES.not_interested_seller.days).toBe(30);
+    expect(SUPPRESSION_RULES.not_interested_video.days).toBe(7);
+    expect(SUPPRESSION_RULES.unfollow.days).toBe(30);
+    expect(SUPPRESSION_RULES.refund_requested.days).toBe(14);
+    expect(SUPPRESSION_RULES.dispute_filed.days).toBeNull();
+    expect(SELLER_BLOCK_DAYS).toBe(30);
+    expect(NEIGHBOUR_SUPPRESSION_DAYS).toBe(7);
+    expect(NEIGHBOUR_SUPPRESSION_K).toBe(20);
+    expect(UNFOLLOW_SUPPRESSION_DAYS).toBe(30);
+    expect(REFUND_SUPPRESSION_DAYS).toBe(14);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Each weight applied exactly once
+// ---------------------------------------------------------------------------
+
+describe('6.5 — each weight is applied exactly once', () => {
+  it('unfollow costs -5 seller affinity, once', () => {
+    const { sellerDeltas } = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'unfollow', sellerId: 's1' }],
+      now: NOW,
+    });
+    expect(sellerDeltas).toEqual([{ key: 's1', delta: -5 }]);
+  });
+
+  it('refund_requested costs -4 seller affinity, once', () => {
+    const { sellerDeltas } = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'refund_requested', sellerId: 's1' }],
+      now: NOW,
+    });
+    expect(sellerDeltas).toEqual([{ key: 's1', delta: -4 }]);
+  });
+
+  it('dispute_filed moves no affinity at all — the suppression is the mechanism', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'dispute_filed', sellerId: 's1' }],
+      now: NOW,
+    });
+    expect(result.sellerDeltas).toEqual([]);
+    expect(result.suppressions).toHaveLength(1);
+  });
+
+  it('the identical signal repeated in one batch counts once', () => {
+    const { sellerDeltas, suppressions } = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'unfollow', sellerId: 's1' },
+      ],
+      now: NOW,
+    });
+    expect(sellerDeltas).toEqual([{ key: 's1', delta: -5 }]);
+    expect(suppressions).toHaveLength(1);
+  });
+
+  it('two genuinely separate occurrences, distinguished by id, both count', () => {
+    const { sellerDeltas, suppressions } = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'refund_requested', sellerId: 's1', id: 'order-1' },
+        { type: 'refund_requested', sellerId: 's1', id: 'order-2' },
+      ],
+      now: NOW,
+    });
+    expect(sellerDeltas).toEqual([
+      { key: 's1', delta: -4 },
+      { key: 's1', delta: -4 },
+    ]);
+    // Two refunds, one suppression window: the rows merge, the weights do not.
+    expect(suppressions).toHaveLength(1);
+  });
+
+  it('not_interested takes -8 exactly once, from EVENT_WEIGHTS and nowhere else', () => {
+    const { raw } = updateViewerAffinityWithSignals({
+      profile: { ...PROFILE, categoryAffinity: { beauty: 20 }, sellerAffinity: { s9: 20 } },
+      viewerId: VIEWER,
+      events: [{ type: 'not_interested', categoryId: 'beauty', sellerId: 's9', videoId: 'v1' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    // 20 - 8, not 20 - 16.
+    expect(raw.categoryAffinity.beauty).toBeCloseTo(12, 12);
+    expect(raw.sellerAffinity.s9).toBeCloseTo(12, 12);
+  });
+
+  it('fast_skip takes -1.5 exactly once and suppresses nothing', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: { ...PROFILE, categoryAffinity: { beauty: 10 } },
+      viewerId: VIEWER,
+      events: [{ type: 'fast_skip', categoryId: 'beauty', sellerId: 's1', videoId: 'v1' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.categoryAffinity.beauty).toBeCloseTo(8.5, 12);
+    expect(out.suppressions).toEqual([]);
+    expect(out.neighbours.requested).toBe(0);
+    expect(out.neighbours.degraded).toBe(false);
+  });
+
+  it('unfollow lands on the seller map only, before normalisation', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10, s3: 10 }),
+      viewerId: VIEWER,
+      events: [{ type: 'unfollow', sellerId: 's1', categoryId: 'apparel' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity).toEqual({ s1: 5, s2: 10, s3: 10 });
+    expect(out.raw.categoryAffinity).toEqual({});
+    expect(out.raw.hashtagAffinity).toEqual({});
+    // The returned profile is exactly the normaliser applied to that raw map.
+    expect(out.profile.sellerAffinity).toEqual(normalizeWithCap({ s1: 5, s2: 10, s3: 10 }));
+  });
+
+  it('refund lands on the seller map only', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10 }),
+      viewerId: VIEWER,
+      events: [{ type: 'refund_requested', sellerId: 's1' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity).toEqual({ s1: 6, s2: 10 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Expiry boundaries
+// ---------------------------------------------------------------------------
+
+describe('6.5 — expiry boundaries are exact', () => {
+  const rows = applyNegativeSignals({
+    viewerId: VIEWER,
+    signals: [
+      { type: 'not_interested', sellerId: 's1', videoId: 'v1' },
+      { type: 'unfollow', sellerId: 's2' },
+      { type: 'refund_requested', sellerId: 's3' },
+      { type: 'dispute_filed', sellerId: 's4' },
+    ],
+    now: NOW,
+  }).suppressions;
+
+  const rowFor = (scope: Suppression['scope'], id: string): Suppression => {
+    const found = rows.find((r) => r.scope === scope && r.id === id);
+    expect(found, `${scope}:${id}`).toBeDefined();
+    return found as Suppression;
+  };
+
+  it('not_interested blocks the seller for exactly 30 days', () => {
+    const row = rowFor('viewer_seller', 's1');
+    expect(row.until?.toISOString()).toBe('2026-01-31T00:00:00.000Z');
+    expect(isSuppressionActive(row, msBefore(PLUS_30D))).toBe(true);
+    expect(isSuppressionActive(row, PLUS_30D)).toBe(false);
+    expect(isSuppressionActive(row, msAfter(PLUS_30D))).toBe(false);
+  });
+
+  it('the disliked video and its neighbours are suppressed for exactly 7 days', () => {
+    const row = rowFor('viewer_video', 'v1');
+    expect(row.until?.toISOString()).toBe('2026-01-08T00:00:00.000Z');
+    expect(isSuppressionActive(row, msBefore(PLUS_7D))).toBe(true);
+    expect(isSuppressionActive(row, PLUS_7D)).toBe(false);
+    // Not 6.99 days: a day short of the window is still suppressed.
+    expect(isSuppressionActive(row, at('2026-01-07T00:00:00.000Z'))).toBe(true);
+    expect(isSuppressionActive(row, at('2026-01-09T00:00:00.000Z'))).toBe(false);
+  });
+
+  it('unfollow suppresses For You for exactly 30 days', () => {
+    const row = rowFor('viewer_seller', 's2');
+    expect(row.until?.toISOString()).toBe('2026-01-31T00:00:00.000Z');
+    expect(isSuppressionActive(row, msBefore(PLUS_30D))).toBe(true);
+    expect(isSuppressionActive(row, PLUS_30D)).toBe(false);
+  });
+
+  it('refund suppresses for exactly 14 days — not 13, not 15', () => {
+    const row = rowFor('viewer_seller', 's3');
+    expect(row.until?.toISOString()).toBe('2026-01-15T00:00:00.000Z');
+    expect(isSuppressionActive(row, at('2026-01-14T00:00:00.000Z'))).toBe(true);
+    expect(isSuppressionActive(row, msBefore(PLUS_14D))).toBe(true);
+    expect(isSuppressionActive(row, PLUS_14D)).toBe(false);
+    expect(isSuppressionActive(row, msAfter(PLUS_14D))).toBe(false);
+  });
+
+  it('a filed dispute never expires on its own', () => {
+    const row = rowFor('platform_seller', 's4');
+    expect(row.until).toBeNull();
+    expect(isSuppressionActive(row, PLUS_30D)).toBe(true);
+    expect(isSuppressionActive(row, at('3000-01-01T00:00:00.000Z'))).toBe(true);
+  });
+
+  it('activeSuppressions drops exactly the lapsed rows', () => {
+    expect(activeSuppressions(rows, NOW)).toHaveLength(rows.length);
+    // Day 14: the 7-day video row and the 14-day refund row have both lapsed.
+    const live = activeSuppressions(rows, PLUS_14D);
+    expect(live.map((r) => r.id).sort()).toEqual(['s1', 's2', 's4']);
+    // Day 30: only the platform-wide dispute survives.
+    expect(activeSuppressions(rows, PLUS_30D).map((r) => r.id)).toEqual(['s4']);
+    expect(activeSuppressions(rows, at('3000-01-01T00:00:00.000Z'))).toHaveLength(1);
+  });
+
+  it('matches the 2.7 seller-block boundary exactly', () => {
+    const block = blockSellerFrom('s1', NOW);
+    const row = suppressionFromSellerBlock(block, VIEWER);
+    for (const when of [msBefore(PLUS_30D), PLUS_30D, msAfter(PLUS_30D)]) {
+      expect(isSuppressionActive(row, when)).toBe(isSellerBlocked(block, when));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scope: platform-wide is not viewer-scoped
+// ---------------------------------------------------------------------------
+
+describe('6.5 — platform-wide and viewer-scoped genuinely differ', () => {
+  const rows = applyNegativeSignals({
+    viewerId: VIEWER,
+    signals: [
+      { type: 'unfollow', sellerId: 'unfollowed' },
+      { type: 'not_interested', sellerId: 'disliked', videoId: 'v1' },
+      { type: 'refund_requested', sellerId: 'refunded' },
+      { type: 'dispute_filed', sellerId: 'disputed' },
+    ],
+    now: NOW,
+  }).suppressions;
+
+  it('a filed dispute has no viewer and no expiry', () => {
+    const row = scoped(rows, 'platform_seller')[0];
+    expect(row).toMatchObject({ id: 'disputed', viewerId: null, until: null, surface: 'all' });
+    expect(scoped(rows, 'platform_seller')).toHaveLength(1);
+  });
+
+  it('the disputed seller is suppressed for a viewer who has never touched them', () => {
+    expect(isSuppressed(rows, { viewerId: OTHER_VIEWER, sellerId: 'disputed', now: NOW })).toBe(
+      true
+    );
+    expect(isSuppressed(rows, { viewerId: 'anyone-at-all', sellerId: 'disputed', now: NOW })).toBe(
+      true
+    );
+  });
+
+  it('every viewer-scoped row is invisible to a different viewer', () => {
+    for (const sellerId of ['unfollowed', 'disliked', 'refunded']) {
+      expect(isSuppressed(rows, { viewerId: VIEWER, sellerId, now: NOW }), sellerId).toBe(true);
+      expect(isSuppressed(rows, { viewerId: OTHER_VIEWER, sellerId, now: NOW }), sellerId).toBe(
+        false
+      );
+    }
+  });
+
+  it('a video suppression follows the viewer, not the platform', () => {
+    expect(isSuppressed(rows, { viewerId: VIEWER, videoId: 'v1', now: NOW })).toBe(true);
+    expect(isSuppressed(rows, { viewerId: OTHER_VIEWER, videoId: 'v1', now: NOW })).toBe(false);
+  });
+
+  it('a seller query never matches a video row, and vice versa', () => {
+    expect(isSuppressed(rows, { viewerId: VIEWER, sellerId: 'v1', now: NOW })).toBe(false);
+    expect(isSuppressed(rows, { viewerId: VIEWER, videoId: 'disliked', now: NOW })).toBe(false);
+    expect(isSuppressed(rows, { viewerId: VIEWER, now: NOW })).toBe(false);
+  });
+
+  it('surface separates a block from a For You suppression', () => {
+    // not_interested is a block: the seller is gone everywhere.
+    expect(
+      isSuppressed(rows, { viewerId: VIEWER, sellerId: 'disliked', now: NOW, surface: 'all' })
+    ).toBe(true);
+    // Unfollow and refund only hide the seller from the ranked feed.
+    expect(
+      isSuppressed(rows, { viewerId: VIEWER, sellerId: 'unfollowed', now: NOW, surface: 'all' })
+    ).toBe(false);
+    expect(
+      isSuppressed(rows, { viewerId: VIEWER, sellerId: 'refunded', now: NOW, surface: 'all' })
+    ).toBe(false);
+    // A filed dispute reaches every surface.
+    expect(
+      isSuppressed(rows, { viewerId: OTHER_VIEWER, sellerId: 'disputed', now: NOW, surface: 'all' })
+    ).toBe(true);
+  });
+
+  it('findSuppression names the signal that hid the candidate', () => {
+    expect(findSuppression(rows, { viewerId: VIEWER, sellerId: 'refunded', now: NOW })?.reason).toBe(
+      'refund_requested'
+    );
+    expect(
+      findSuppression(rows, { viewerId: OTHER_VIEWER, sellerId: 'disputed', now: NOW })?.reason
+    ).toBe('dispute_filed');
+    expect(findSuppression(rows, { viewerId: VIEWER, sellerId: 'nobody', now: NOW })).toBeNull();
+  });
+
+  it('a lapsed row stops hiding anything', () => {
+    expect(isSuppressed(rows, { viewerId: VIEWER, sellerId: 'refunded', now: PLUS_14D })).toBe(
+      false
+    );
+    expect(isSuppressed(rows, { viewerId: VIEWER, videoId: 'v1', now: PLUS_7D })).toBe(false);
+    expect(isSuppressed(rows, { viewerId: VIEWER, sellerId: 'disliked', now: PLUS_30D })).toBe(
+      false
+    );
+    // Except the dispute, which nobody has reviewed.
+    expect(
+      isSuppressed(rows, { viewerId: OTHER_VIEWER, sellerId: 'disputed', now: PLUS_30D })
+    ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Neighbour suppression — the important one
+// ---------------------------------------------------------------------------
+
+describe('6.5 — neighbour suppression with an embedding provider', () => {
+  const signals = [{ type: 'not_interested' as const, sellerId: 's1', videoId: 'v1' }];
+
+  it('suppresses the 20 nearest neighbours for 7 days', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    });
+
+    expect(result.neighbours).toEqual({
+      providerPresent: true,
+      requested: 20,
+      suppressed: 20,
+      degraded: false,
+      degradedVideoIds: [],
+    });
+
+    const videoRows = scoped(result.suppressions, 'viewer_video');
+    // 20 neighbours plus the video the viewer actually pressed the button on.
+    expect(videoRows).toHaveLength(21);
+    expect(videoRows.map((r) => r.id)).toContain('v1');
+    for (const row of videoRows) {
+      expect(row.until?.toISOString()).toBe('2026-01-08T00:00:00.000Z');
+      expect(row.viewerId).toBe(VIEWER);
+      expect(row.reason).toBe('not_interested');
+    }
+  });
+
+  it('caps at k even when the provider ignores k', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: rawProvider(neighbourIds(500)),
+    });
+    expect(result.neighbours.suppressed).toBe(20);
+    expect(scoped(result.suppressions, 'viewer_video')).toHaveLength(21);
+  });
+
+  it('a neighbour list containing the source video does not spend a slot on it', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: rawProvider(['v1', ...neighbourIds(20)]),
+    });
+    expect(result.neighbours.suppressed).toBe(20);
+    expect(scoped(result.suppressions, 'viewer_video')).toHaveLength(21);
+  });
+
+  it('deduplicates a provider that repeats itself, and ignores junk ids', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: rawProvider(['nb0', 'nb0', 'nb1', '', 'nb1']),
+    });
+    expect(result.neighbours.suppressed).toBe(2);
+    expect(scoped(result.suppressions, 'viewer_video').map((r) => r.id)).toEqual([
+      'v1',
+      'nb0',
+      'nb1',
+    ]);
+  });
+
+  it('honours an explicit k', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: rawProvider(neighbourIds(50)),
+      neighbourK: 5,
+    });
+    expect(result.neighbours.requested).toBe(5);
+    expect(result.neighbours.suppressed).toBe(5);
+  });
+
+  it('falls back to 20 for a nonsense k', () => {
+    for (const k of [0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = applyNegativeSignals({
+        viewerId: VIEWER,
+        signals,
+        now: NOW,
+        neighbours: rawProvider(neighbourIds(50)),
+        neighbourK: k,
+      });
+      expect(result.neighbours.requested).toBe(NEIGHBOUR_SUPPRESSION_K);
+      expect(result.neighbours.suppressed).toBe(NEIGHBOUR_SUPPRESSION_K);
+    }
+  });
+
+  it('suppresses neighbours per disliked video, not per batch', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'not_interested', sellerId: 's1', videoId: 'v1' },
+        { type: 'not_interested', sellerId: 's1', videoId: 'v2' },
+      ],
+      now: NOW,
+      neighbours: (videoId, k) => neighbourIds(k, `${videoId}-nb`),
+    });
+    expect(result.neighbours.requested).toBe(40);
+    expect(result.neighbours.suppressed).toBe(40);
+    expect(scoped(result.suppressions, 'viewer_video')).toHaveLength(42);
+    // One seller, one seller block, however many videos.
+    expect(scoped(result.suppressions, 'viewer_seller')).toHaveLength(1);
+  });
+});
+
+describe('6.5 — neighbour suppression degrades loudly without 6.2', () => {
+  const signals = [{ type: 'not_interested' as const, sellerId: 's1', videoId: 'v1' }];
+
+  it('with no provider it reports the degradation instead of pretending', () => {
+    const result = applyNegativeSignals({ viewerId: VIEWER, signals, now: NOW });
+    expect(result.neighbours).toEqual({
+      providerPresent: false,
+      requested: 20,
+      suppressed: 0,
+      degraded: true,
+      degradedVideoIds: ['v1'],
+    });
+    // It still does the one thing it can: the video itself, and the seller.
+    expect(scoped(result.suppressions, 'viewer_video').map((r) => r.id)).toEqual(['v1']);
+    expect(scoped(result.suppressions, 'viewer_seller')).toHaveLength(1);
+  });
+
+  it('NO_NEIGHBOURS is indistinguishable from supplying nothing', () => {
+    const withNone = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: NO_NEIGHBOURS,
+    });
+    const withNothing = applyNegativeSignals({ viewerId: VIEWER, signals, now: NOW });
+    expect(withNone).toEqual(withNothing);
+    expect(withNone.neighbours.providerPresent).toBe(false);
+    expect(NO_NEIGHBOURS('v1', 20)).toEqual([]);
+  });
+
+  it('a wired provider that knows nothing about this video is degraded but present', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals,
+      now: NOW,
+      neighbours: (videoId) => (videoId === 'v-other' ? ['nb0'] : []),
+    });
+    expect(result.neighbours.providerPresent).toBe(true);
+    expect(result.neighbours.degraded).toBe(true);
+    expect(result.neighbours.degradedVideoIds).toEqual(['v1']);
+  });
+
+  it('partial coverage is visible without being called total degradation', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'not_interested', videoId: 'v1' },
+        { type: 'not_interested', videoId: 'v2' },
+      ],
+      now: NOW,
+      neighbours: (videoId, k) => (videoId === 'v1' ? neighbourIds(k) : []),
+    });
+    expect(result.neighbours.requested).toBe(40);
+    expect(result.neighbours.suppressed).toBe(20);
+    expect(result.neighbours.degraded).toBe(true);
+    expect(result.neighbours.degradedVideoIds).toEqual(['v2']);
+  });
+
+  it('nothing to suppress is not a degradation', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'unfollow', sellerId: 's1' }],
+      now: NOW,
+    });
+    expect(result.neighbours.requested).toBe(0);
+    expect(result.neighbours.degraded).toBe(false);
+    expect(result.neighbours.degradedVideoIds).toEqual([]);
+  });
+
+  it('a not_interested with no videoId cannot ask for neighbours at all', () => {
+    const result = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'not_interested', sellerId: 's1' }],
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    });
+    expect(result.neighbours.requested).toBe(0);
+    expect(result.neighbours.degraded).toBe(false);
+    expect(scoped(result.suppressions, 'viewer_video')).toHaveLength(0);
+    expect(scoped(result.suppressions, 'viewer_seller')).toHaveLength(1);
+  });
+
+  it('one injection makes it real — the same call, wired', () => {
+    const degraded = updateViewerAffinityWithSignals({
+      profile: PROFILE,
+      viewerId: VIEWER,
+      events: [{ type: 'not_interested', sellerId: 's1', videoId: 'v1', categoryId: 'beauty' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    const wired = updateViewerAffinityWithSignals({
+      profile: PROFILE,
+      viewerId: VIEWER,
+      events: [{ type: 'not_interested', sellerId: 's1', videoId: 'v1', categoryId: 'beauty' }],
+      daysElapsed: 0,
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    });
+    expect(degraded.neighbours.degraded).toBe(true);
+    expect(wired.neighbours.degraded).toBe(false);
+    expect(wired.neighbours.suppressed).toBe(20);
+    // The affinity half is identical either way: only the reach changed.
+    expect(wired.raw).toEqual(degraded.raw);
+    expect(wired.profile).toEqual(degraded.profile);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Merging
+// ---------------------------------------------------------------------------
+
+describe('6.5 — mergeSuppressions', () => {
+  it('keeps the longest-lived of two rows that say the same thing', () => {
+    const short: Suppression = {
+      scope: 'viewer_seller',
+      id: 's1',
+      viewerId: VIEWER,
+      until: PLUS_7D,
+      surface: 'for_you',
+      reason: 'unfollow',
+    };
+    const long: Suppression = { ...short, until: PLUS_30D };
+    expect(mergeSuppressions([short, long])).toEqual([long]);
+    expect(mergeSuppressions([long, short])).toEqual([long]);
+  });
+
+  it('an indefinite row beats any dated one', () => {
+    const dated: Suppression = {
+      scope: 'platform_seller',
+      id: 's1',
+      viewerId: null,
+      until: PLUS_30D,
+      surface: 'all',
+      reason: 'dispute_filed',
+    };
+    const forever: Suppression = { ...dated, until: null };
+    expect(mergeSuppressions([dated, forever])).toEqual([forever]);
+    expect(mergeSuppressions([forever, dated])).toEqual([forever]);
+  });
+
+  it('does not merge across reasons, so a refollow cannot lift a refund', () => {
+    const rows = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'refund_requested', sellerId: 's1' },
+      ],
+      now: NOW,
+    }).suppressions;
+    // Same scope, id, viewer and surface — kept apart by reason alone.
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.reason).sort()).toEqual(['refund_requested', 'unfollow']);
+
+    const survivors = revokeSuppressions(rows, [revocationForRefollow('s1', VIEWER)]);
+    expect(survivors.map((r) => r.reason)).toEqual(['refund_requested']);
+    expect(isSuppressed(survivors, { viewerId: VIEWER, sellerId: 's1', now: NOW })).toBe(true);
+  });
+
+  it('does not merge across viewers or scopes', () => {
+    const rows = mergeSuppressions([
+      ...applyNegativeSignals({
+        viewerId: VIEWER,
+        signals: [{ type: 'unfollow', sellerId: 's1' }],
+        now: NOW,
+      }).suppressions,
+      ...applyNegativeSignals({
+        viewerId: OTHER_VIEWER,
+        signals: [{ type: 'unfollow', sellerId: 's1' }],
+        now: NOW,
+      }).suppressions,
+      ...applyNegativeSignals({
+        viewerId: VIEWER,
+        signals: [{ type: 'dispute_filed', sellerId: 's1' }],
+        now: NOW,
+      }).suppressions,
+    ]);
+    expect(rows).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unfollow -> refollow
+// ---------------------------------------------------------------------------
+
+describe('6.5 — unfollow then refollow is not a life sentence', () => {
+  const unfollowThenFollow: ViewerEvent[] = [
+    { type: 'unfollow', sellerId: 's1' },
+    { type: 'follow', sellerId: 's1' },
+  ];
+
+  it('an unfollow on its own suppresses for 30 days', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10 }),
+      viewerId: VIEWER,
+      events: [{ type: 'unfollow', sellerId: 's1' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.revocations).toEqual([]);
+    expect(isSuppressed(out.suppressions, { viewerId: VIEWER, sellerId: 's1', now: NOW })).toBe(
+      true
+    );
+  });
+
+  it('a refollow in the same batch leaves no suppression standing', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10 }),
+      viewerId: VIEWER,
+      events: unfollowThenFollow,
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.suppressions).toEqual([]);
+    expect(isSuppressed(out.suppressions, { viewerId: VIEWER, sellerId: 's1', now: NOW })).toBe(
+      false
+    );
+    expect(out.revocations).toEqual([
+      { scope: 'viewer_seller', id: 's1', viewerId: VIEWER, reason: 'unfollow' },
+    ]);
+  });
+
+  it('the -5 still happened — affinity records behaviour, suppression records intent', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10 }),
+      viewerId: VIEWER,
+      events: unfollowThenFollow,
+      daysElapsed: 0,
+      now: NOW,
+    });
+    // 10 - 5 (unfollow) + 3 (follow).
+    expect(out.raw.sellerAffinity.s1).toBeCloseTo(8, 12);
+  });
+
+  it('the revocation clears a row persisted by an earlier batch', () => {
+    const persisted = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10 }),
+      viewerId: VIEWER,
+      events: [{ type: 'unfollow', sellerId: 's1' }],
+      daysElapsed: 0,
+      now: NOW,
+    }).suppressions;
+    expect(persisted).toHaveLength(1);
+
+    const later = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 5 }),
+      viewerId: VIEWER,
+      events: [{ type: 'follow', sellerId: 's1' }],
+      daysElapsed: 1,
+      now: NOW,
+    });
+    expect(later.revocations).toHaveLength(1);
+    expect(revokeSuppressions(persisted, later.revocations)).toEqual([]);
+  });
+
+  it('following and THEN unfollowing keeps the suppression — the unfollow is the newer fact', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10 }),
+      viewerId: VIEWER,
+      events: [
+        { type: 'follow', sellerId: 's1' },
+        { type: 'unfollow', sellerId: 's1' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.revocations).toEqual([]);
+    expect(isSuppressed(out.suppressions, { viewerId: VIEWER, sellerId: 's1', now: NOW })).toBe(
+      true
+    );
+  });
+
+  it('a refollow of one seller does not free another', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 10, s2: 10 }),
+      viewerId: VIEWER,
+      events: [
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'unfollow', sellerId: 's2' },
+        { type: 'follow', sellerId: 's1' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.suppressions.map((r) => r.id)).toEqual(['s2']);
+  });
+
+  it('a follow cannot lift a not_interested block or a refund suppression', () => {
+    const rows = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'not_interested', sellerId: 's1', videoId: 'v1' },
+        { type: 'refund_requested', sellerId: 's1' },
+      ],
+      now: NOW,
+    }).suppressions;
+    const survivors = revokeSuppressions(rows, [revocationForRefollow('s1', VIEWER)]);
+    expect(survivors).toEqual(rows);
+    expect(isSuppressed(survivors, { viewerId: VIEWER, sellerId: 's1', now: NOW })).toBe(true);
+  });
+
+  it('a follow can NEVER lift a platform-wide dispute', () => {
+    const disputed = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'dispute_filed', sellerId: 's1' }],
+      now: NOW,
+    }).suppressions;
+
+    // Every shape of revocation anyone could construct, including a malformed
+    // one aimed straight at the platform scope.
+    const survivors = revokeSuppressions(disputed, [
+      revocationForRefollow('s1', VIEWER),
+      { scope: 'viewer_seller', id: 's1', viewerId: VIEWER, reason: 'dispute_filed' },
+      { scope: 'platform_seller', id: 's1', viewerId: VIEWER, reason: 'dispute_filed' },
+    ]);
+    expect(survivors).toEqual(disputed);
+    expect(isSuppressed(survivors, { viewerId: OTHER_VIEWER, sellerId: 's1', now: NOW })).toBe(true);
+  });
+
+  it('a follow by one viewer does not free the seller for another viewer', () => {
+    const mine = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'unfollow', sellerId: 's1' }],
+      now: NOW,
+    }).suppressions;
+    const theirs = applyNegativeSignals({
+      viewerId: OTHER_VIEWER,
+      signals: [{ type: 'unfollow', sellerId: 's1' }],
+      now: NOW,
+    }).suppressions;
+    const survivors = revokeSuppressions([...mine, ...theirs], [
+      revocationForRefollow('s1', VIEWER),
+    ]);
+    expect(survivors).toEqual(theirs);
+  });
+
+  it('revoking nothing changes nothing', () => {
+    const rows = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [{ type: 'unfollow', sellerId: 's1' }],
+      now: NOW,
+    }).suppressions;
+    expect(revokeSuppressions(rows, [])).toEqual(rows);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stacked negatives vs the water-filling normaliser
+// ---------------------------------------------------------------------------
+
+describe('6.5 — stacked negatives never break the normaliser', () => {
+  it('applyAffinityDeltas floors at 0 rather than accumulating debt', () => {
+    expect(applyAffinityDeltas({ s1: 3 }, [{ key: 's1', delta: -5 }])).toEqual({ s1: 0 });
+    expect(
+      applyAffinityDeltas({ s1: 3 }, [
+        { key: 's1', delta: -5 },
+        { key: 's1', delta: -4 },
+      ])
+    ).toEqual({ s1: 0 });
+    // A delta for an unseen seller creates the key at 0, exactly as applyEvents does.
+    expect(applyAffinityDeltas({ s1: 3 }, [{ key: 's2', delta: -4 }])).toEqual({ s1: 3, s2: 0 });
+    expect(applyAffinityDeltas({ s1: 3 }, [{ key: '', delta: -4 }])).toEqual({ s1: 3 });
+    expect(applyAffinityDeltas({ s1: 3 }, [{ key: 's1', delta: Number.NaN }])).toEqual({ s1: 3 });
+  });
+
+  it('every stacked negative lands on a seller already at 0 and the map still normalises', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 2, s2: 8, s3: 6 }),
+      viewerId: VIEWER,
+      events: [
+        { type: 'not_interested', sellerId: 's1', videoId: 'v1', categoryId: 'beauty' },
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'refund_requested', sellerId: 's1', id: 'o1' },
+        { type: 'refund_requested', sellerId: 's1', id: 'o2' },
+        { type: 'dispute_filed', sellerId: 's1' },
+        { type: 'fast_skip', sellerId: 's1', categoryId: 'beauty' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity.s1).toBe(0);
+    // Feed the raw map straight into the normaliser, as the cron does.
+    expectValidDistribution(normalizeWithCap(out.raw.sellerAffinity));
+    expect(sum(normalizeWithCap(out.raw.sellerAffinity))).toBeCloseTo(1, 12);
+    // And the profile the ranker reads is already that distribution.
+    expectValidDistribution(out.profile.sellerAffinity);
+    expect(out.profile.sellerAffinity).toEqual(normalizeWithCap(out.raw.sellerAffinity));
+  });
+
+  it('driving EVERY seller to zero degrades to uniform, not to NaN', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 4, s2: 3, s3: 2 }),
+      viewerId: VIEWER,
+      events: [
+        { type: 'unfollow', sellerId: 's1' },
+        { type: 'unfollow', sellerId: 's2' },
+        { type: 'unfollow', sellerId: 's3' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity).toEqual({ s1: 0, s2: 0, s3: 0 });
+    expectValidDistribution(out.profile.sellerAffinity);
+    for (const v of Object.values(out.profile.sellerAffinity)) expect(v).toBeCloseTo(1 / 3, 12);
+  });
+
+  it('holds across a seeded sweep of stacked negatives', () => {
+    const rng = mulberry32(20260819);
+    const types = ['unfollow', 'refund_requested', 'dispute_filed', 'not_interested'] as const;
+    for (let trial = 0; trial < 200; trial++) {
+      const n = 1 + Math.floor(rng() * 6);
+      const seller: AffinityMap = {};
+      for (let i = 0; i < n; i++) seller[`s${i}`] = rng() < 0.3 ? 0 : rng() * 20;
+
+      const events: ViewerEvent[] = [];
+      const eventCount = Math.floor(rng() * 12);
+      for (let i = 0; i < eventCount; i++) {
+        events.push({
+          type: types[Math.floor(rng() * types.length)],
+          sellerId: `s${Math.floor(rng() * n)}`,
+          videoId: `v${i}`,
+          categoryId: 'beauty',
+          id: `e${i}`,
+        });
+      }
+
+      const out = updateViewerAffinityWithSignals({
+        profile: profileWith(seller),
+        viewerId: VIEWER,
+        events,
+        daysElapsed: rng() * 60,
+        now: NOW,
+      });
+
+      for (const v of Object.values(out.raw.sellerAffinity)) {
+        expect(Number.isFinite(v)).toBe(true);
+        expect(v).toBeGreaterThanOrEqual(0);
+      }
+      expectValidDistribution(normalizeWithCap(out.raw.sellerAffinity));
+      expectValidDistribution(out.profile.sellerAffinity);
+      // A trial with no events touches no category, and an empty map stays
+      // empty — that is normalizeWithCap's documented degenerate case, not a
+      // distribution to check.
+      if (Object.keys(out.profile.categoryAffinity).length > 0) {
+        expectValidDistribution(out.profile.categoryAffinity);
+      }
+    }
+  });
+
+  it('the cap still binds after a negative pass', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 900, s2: 40, s3: 30, s4: 20, s5: 10 }),
+      viewerId: VIEWER,
+      events: [{ type: 'unfollow', sellerId: 's2' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expectValidDistribution(out.profile.sellerAffinity);
+    expect(out.profile.sellerAffinity.s1).toBeCloseTo(AFFINITY_CAP, 12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The composed pass
+// ---------------------------------------------------------------------------
+
+describe('updateViewerAffinityWithSignals', () => {
+  const mixed: ViewerEvent[] = [
+    { type: 'purchase', categoryId: 'apparel', sellerId: 's1', hashtags: ['denim'] },
+    { type: 'not_interested', categoryId: 'beauty', sellerId: 's2', videoId: 'v9' },
+    { type: 'unfollow', sellerId: 's3' },
+    { type: 'refund_requested', sellerId: 's4' },
+    { type: 'dispute_filed', sellerId: 's5' },
+  ];
+
+  it('runs both passes over one stream and leaves all three maps legal', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s3: 10, s4: 10 }),
+      viewerId: VIEWER,
+      events: mixed,
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expectValidDistribution(out.profile.categoryAffinity);
+    expectValidDistribution(out.profile.sellerAffinity);
+    expectValidDistribution(out.profile.hashtagAffinity);
+  });
+
+  it('6.5-only types are invisible to the 2.7 pass', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: PROFILE,
+      viewerId: VIEWER,
+      events: [
+        { type: 'unfollow', sellerId: 's1', categoryId: 'apparel', hashtags: ['denim'] },
+        { type: 'dispute_filed', sellerId: 's2', categoryId: 'apparel' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    // No category or hashtag mass moved: 6.5 seller weights are seller-only.
+    expect(out.raw.categoryAffinity).toEqual({});
+    expect(out.raw.hashtagAffinity).toEqual({});
+    expect(out.raw.sellerAffinity).toEqual({ s1: 0 });
+  });
+
+  it('agrees with running the two passes separately', () => {
+    const profile = profileWith({ s3: 10, s4: 10 });
+    const composed = updateViewerAffinityWithSignals({
+      profile,
+      viewerId: VIEWER,
+      events: mixed,
+      daysElapsed: 3,
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    });
+
+    const twoSeven = updateViewerAffinity(
+      profile,
+      mixed.filter((e) => e.type === 'purchase' || e.type === 'not_interested') as AffinityEvent[],
+      3,
+      NOW
+    );
+    const sixFive = applyNegativeSignals({
+      viewerId: VIEWER,
+      signals: [
+        { type: 'not_interested', categoryId: 'beauty', sellerId: 's2', videoId: 'v9' },
+        { type: 'unfollow', sellerId: 's3' },
+        { type: 'refund_requested', sellerId: 's4' },
+        { type: 'dispute_filed', sellerId: 's5' },
+      ],
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    });
+
+    expect(composed.raw.categoryAffinity).toEqual(twoSeven.raw.categoryAffinity);
+    expect(composed.raw.hashtagAffinity).toEqual(twoSeven.raw.hashtagAffinity);
+    expect(composed.raw.sellerAffinity).toEqual(
+      applyAffinityDeltas(twoSeven.raw.sellerAffinity, sixFive.sellerDeltas)
+    );
+    expect(composed.suppressions).toEqual(sixFive.suppressions);
+    expect(composed.neighbours).toEqual(sixFive.neighbours);
+  });
+
+  it('carries the 2.7 seller blocks through, as a subset of the suppressions', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: PROFILE,
+      viewerId: VIEWER,
+      events: mixed,
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.sellerBlocks).toEqual([
+      { sellerId: 's2', blockedUntil: new Date('2026-01-31T00:00:00.000Z') },
+    ]);
+    for (const block of out.sellerBlocks) {
+      expect(out.suppressions).toContainEqual(suppressionFromSellerBlock(block, VIEWER));
+    }
+  });
+
+  it('carries non-affinity profile fields through untouched', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: PROFILE,
+      viewerId: VIEWER,
+      events: mixed,
+      daysElapsed: 5,
+      now: NOW,
+    });
+    expect(out.profile.priceBand).toEqual(PROFILE.priceBand);
+    expect(out.profile.coldStartComplete).toBe(true);
+  });
+
+  it('an empty stream is a clean no-op', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 4, s2: 6 }),
+      viewerId: VIEWER,
+      events: [],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity).toEqual({ s1: 4, s2: 6 });
+    expect(out.suppressions).toEqual([]);
+    expect(out.revocations).toEqual([]);
+    expect(out.neighbours.degraded).toBe(false);
+  });
+
+  it('ignores malformed events instead of poisoning the maps', () => {
+    const out = updateViewerAffinityWithSignals({
+      profile: profileWith({ s1: 4 }),
+      viewerId: VIEWER,
+      events: [
+        { type: 'teleported' as AffinityEventType },
+        { type: 'unfollow', sellerId: '' },
+        { type: 'unfollow', sellerId: null },
+        { type: 'dispute_filed' },
+      ],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(out.raw.sellerAffinity).toEqual({ s1: 4 });
+    expect(out.suppressions).toEqual([]);
+  });
+
+  it('is deterministic: same inputs, same output', () => {
+    const input = {
+      profile: profileWith({ s3: 10, s4: 10 }),
+      viewerId: VIEWER,
+      events: mixed,
+      daysElapsed: 7,
+      now: NOW,
+      neighbours: indexOf(neighbourIds(50)),
+    };
+    expect(updateViewerAffinityWithSignals(input)).toEqual(
+      updateViewerAffinityWithSignals(input)
+    );
+  });
+
+  it('does not mutate the profile it was given', () => {
+    const seller = { s1: 10 };
+    const profile = profileWith(seller);
+    updateViewerAffinityWithSignals({
+      profile,
+      viewerId: VIEWER,
+      events: [{ type: 'unfollow', sellerId: 's1' }],
+      daysElapsed: 0,
+      now: NOW,
+    });
+    expect(seller).toEqual({ s1: 10 });
+    expect(profile.sellerAffinity).toEqual({ s1: 10 });
   });
 });

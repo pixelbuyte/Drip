@@ -3,34 +3,26 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { ANON_COOKIE, verifyAnonId } from '@/lib/anon-id';
-import { getFeedSliceRankedOrNaive, resolveCountryCode } from '@/lib/feed/ranked-slice';
-import { FEED_SLICE_SIZE, type FeedResponse, type FeedSurface } from '@/lib/feed/types';
+import { getSearchSlice } from '@/lib/search/slice';
+import { FEED_SLICE_SIZE, type FeedResponse } from '@/lib/feed/types';
 
 export const dynamic = 'force-dynamic';
 
-const SURFACES = [
-  'for_you', 'following', 'category', 'seller_profile', 'search', 'shared_link',
-] as const;
-
 const querySchema = z.object({
   session_id: z.string().uuid(),
-  surface: z.enum(SURFACES).default('for_you'),
-  // Everything already served this session. Capped: the client trims its own
-  // list, and an unbounded IN () would eventually blow the statement.
+  // Free-text query. Capped well under products.title/description's own
+  // bounds; a search box is not a text field for pasting an essay into.
+  q: z.string().min(1).max(200),
+  // Everything already served this session, same convention as /api/feed.
   exclude_ids: z.string().max(8_000).optional(),
   category: z.string().max(40).optional(),
   seller: z.string().max(40).optional(),
-  // Accepted and echoed, not yet honored — step 10 owns it.
-  mode: z.enum(['default', 'diversify']).default('default'),
-  offset: z.coerce.number().int().min(0).max(5_000).default(0),
-  // Cursor for reverse-chronological paging; see getFeedSlice.
-  before: z.string().datetime({ offset: true }).optional(),
 });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export async function GET(request: NextRequest) {
-  if (!rateLimit(`feed:${clientIp(request)}`, 60, 60_000)) {
+  if (!rateLimit(`search:${clientIp(request)}`, 60, 60_000)) {
     return NextResponse.json({ error: 'Slow down a moment.' }, { status: 429 });
   }
 
@@ -40,8 +32,6 @@ export async function GET(request: NextRequest) {
     request.headers.get('x-drip-anon-id');
 
   if (!anonId || !UUID_RE.test(anonId)) {
-    // The proxy mints this before any route renders; missing means the cookie
-    // was stripped (some in-app browsers do) or forged.
     return NextResponse.json({ error: 'No viewer identity' }, { status: 400 });
   }
 
@@ -52,6 +42,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
   }
 
+  if (!rateLimit(`search:anon:${anonId}`, 30, 60_000)) {
+    return new NextResponse(null, { status: 429 });
+  }
+
   const excludeIds = (params.exclude_ids ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -60,33 +54,32 @@ export async function GET(request: NextRequest) {
 
   try {
     const db = createAdminClient();
-    const { items, exhausted, nextBefore } = await getFeedSliceRankedOrNaive(db, {
+    const { items, exhausted } = await getSearchSlice(db, {
+      query: params.q,
       anonId,
       sessionId: params.session_id,
-      surface: params.surface as FeedSurface,
       excludeIds,
       categorySlug: params.category ?? null,
       sellerHandle: params.seller ?? null,
       limit: FEED_SLICE_SIZE,
-      before: params.before ?? null,
-      offset: params.offset,
-      countryCode: resolveCountryCode(request.headers.get('x-vercel-ip-country')),
     });
 
     const body: FeedResponse = {
       items,
       sessionId: params.session_id,
-      surface: params.surface as FeedSurface,
+      surface: 'search',
       exhausted,
-      mode: params.mode,
-      nextBefore,
+      mode: 'default',
+      // No cursor concept for a ranked search result page — pagination is
+      // exclude_ids growing, same as the ranked feed's own nextBefore:null.
+      nextBefore: null,
     };
 
     return NextResponse.json(body, {
       headers: { 'Cache-Control': 'private, no-store' },
     });
   } catch (err) {
-    console.error('feed slice failed:', err);
-    return NextResponse.json({ error: 'Could not load the feed' }, { status: 500 });
+    console.error('search slice failed:', err);
+    return NextResponse.json({ error: 'Could not search' }, { status: 500 });
   }
 }

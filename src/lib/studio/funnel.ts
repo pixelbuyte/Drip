@@ -786,7 +786,14 @@ export function buildRetentionCurve(
    ranker uses; nobody outside this repository knows what "affinity" means.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export type TrafficSourceKey = 'affinity' | 'trending' | 'fresh' | 'social' | 'random' | 'shared';
+export type TrafficSourceKey =
+  | 'affinity'
+  | 'trending'
+  | 'fresh'
+  | 'social'
+  | 'random'
+  | 'chrono'
+  | 'shared';
 
 export type TrafficSource = {
   key: TrafficSourceKey;
@@ -817,6 +824,15 @@ const TRAFFIC_COPY: Record<TrafficSourceKey, { label: string; explanation: strin
   random: {
     label: 'Discovery mix',
     explanation: 'A slice of every feed is deliberately unranked, so new sellers surface at all.',
+  },
+  // The naive chronological feed stamps lane 'chrono' on every impression it
+  // serves — which today is 100% of feed traffic, since the ranked pipeline
+  // is dark. Leaving this lane out made the sources section claim "Nothing
+  // served yet" under a funnel full of impressions, or attribute the entire
+  // feed audience to shared links.
+  chrono: {
+    label: 'Newest-first feed',
+    explanation: 'Served by the launch feed, which shows the newest posts to everyone.',
   },
   shared: {
     label: 'Shared links',

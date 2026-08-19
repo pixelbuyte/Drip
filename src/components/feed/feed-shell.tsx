@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FEED_PREFETCH_AT, type FeedItem, type FeedResponse, type FeedSurface } from '@/lib/feed/types';
-import { emit, flushEvents, getSessionId, installEventFlushHandlers, setSurface } from '@/lib/events/client';
+import { adoptSessionId, emit, flushEvents, getSessionId, installEventFlushHandlers, setSurface } from '@/lib/events/client';
 import { useSnapIndex } from '@/hooks/use-snap-index';
 import FeedVideo from './feed-video';
 import ProductBar from './product-bar';
@@ -16,11 +16,29 @@ export default function FeedShell({
   initialItems,
   surface = 'for_you',
   initialExhausted = false,
+  query,
+  sessionId,
 }: {
   initialItems: FeedItem[];
   surface?: FeedSurface;
   initialExhausted?: boolean;
+  /** Present only for the search surface: redirects pagination to
+   * /api/search instead of /api/feed, carrying the query along. */
+  query?: string;
+  /** The server-minted session id the SSR slice was recorded under. Adopted
+   * so every event and follow-up fetch carries the same sid — see
+   * adoptSessionId. Omitted (demo page), the client mints its own. */
+  sessionId?: string;
 }) {
+  // Adopt during the FIRST RENDER, not in an effect: children's effects run
+  // before this component's would, and an impression emitted there must not
+  // mint a different sid first. A lazy state initializer runs exactly once,
+  // before any child renders.
+  useState(() => {
+    if (sessionId) adoptSessionId(sessionId);
+    return null;
+  });
+
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   const [committed, setCommitted] = useState(0);
   const [muted, setMuted] = useState(true);
@@ -68,25 +86,33 @@ export default function FeedShell({
       // once a session got long enough, which read to the viewer as the feed
       // simply ending.
       const exclude = items.map((i) => i.videoId).slice(-200).join(',');
-      const url =
-        `/api/feed?session_id=${getSessionId()}&surface=${surface}` +
-        `&offset=${items.length}` +
-        (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '') +
-        (cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : '');
+      const url = query
+        ? `/api/search?session_id=${getSessionId()}&q=${encodeURIComponent(query)}` +
+          (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '')
+        : `/api/feed?session_id=${getSessionId()}&surface=${surface}` +
+          `&offset=${items.length}` +
+          (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '') +
+          (cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : '');
       const res = await fetch(url, { credentials: 'same-origin' });
       if (!res.ok) return;
       const data = (await res.json()) as FeedResponse;
       cursor.current = data.nextBefore;
-      // An empty slice with a cursor still pointing somewhere means this page
-      // filtered down to nothing, not that the feed ended — ask again.
-      if (data.items.length === 0 && !data.nextBefore) setExhausted(true);
-      else if (data.items.length > 0) setItems((prev) => [...prev, ...data.items]);
+      // The exclude list is capped at 200 ids, so a long session (or a search
+      // with more matches than that) can be served a video already in the
+      // buffer. Re-appending it would duplicate React keys and, on the
+      // cursorless surfaces, loop the same page forever — so dedupe against
+      // what is already here, and a page that yields nothing NEW counts as
+      // the end.
+      const have = new Set(items.map((i) => i.videoId));
+      const fresh = data.items.filter((i) => !have.has(i.videoId));
+      if (fresh.length === 0 && !data.nextBefore) setExhausted(true);
+      else if (fresh.length > 0) setItems((prev) => [...prev, ...fresh]);
     } catch {
       /* the shell keeps whatever it has; the viewer sees no error mid-scroll */
     } finally {
       loading.current = false;
     }
-  }, [items, surface, exhausted]);
+  }, [items, surface, exhausted, query]);
 
   const onCommit = useCallback(
     (index: number) => {

@@ -3,10 +3,10 @@ import {
   FEED_SLICE_SIZE,
   type FeedItem,
   type FeedLane,
-  type FeedProduct,
   type FeedSurface,
-  type VariantGroup,
 } from './types';
+import { loadViewerBlocks } from './blocks';
+import { shapeSellableProducts, type ProductRow } from './products';
 
 /**
  * Step 6 of the build order: the NAIVE feed. Reverse-chronological plus the
@@ -39,53 +39,23 @@ export type SliceParams = {
   before?: string | null;
 };
 
-type ProductRow = {
-  position: number;
-  pinned_at_second: number | null;
-  products: {
-    id: string; title: string; price_cents: number;
-    compare_at_price_cents: number | null; inventory_count: number;
-    low_stock_threshold: number; images: string[] | null;
-    variants: unknown; status: string;
-  } | null;
-};
-
 type VideoRow = {
   id: string; seller_id: string; mux_playback_id: string | null;
   duration_seconds: number; aspect_ratio: string | null;
   thumbnail_url: string | null; caption: string | null;
   hashtags: string[] | null; published_at: string;
   categories: { slug: string } | null;
-  profiles: { id: string; handle: string; display_name: string; avatar_url: string | null } | null;
+  profiles: {
+    id: string; handle: string; display_name: string; avatar_url: string | null;
+    // Nested, not a direct column: charges_enabled moved off profiles onto
+    // seller_payments in the June PII split (profiles is publicly readable;
+    // a payment-processor flag has no business being there). This used to
+    // be selected straight off profiles, which does not exist on the
+    // reconciled schema and would 500 every feed request.
+    seller_payments: { charges_enabled: boolean } | { charges_enabled: boolean }[] | null;
+  } | null;
   video_products: ProductRow[] | null;
 };
-
-function toVariantGroups(raw: unknown): VariantGroup[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((g): VariantGroup[] => {
-    if (!g || typeof g !== 'object') return [];
-    const group = g as Record<string, unknown>;
-    if (typeof group.name !== 'string' || !Array.isArray(group.options)) return [];
-    return [{
-      id: typeof group.id === 'string' ? group.id : group.name,
-      name: group.name,
-      options: group.options.flatMap((o): VariantGroup['options'] => {
-        if (!o || typeof o !== 'object') return [];
-        const opt = o as Record<string, unknown>;
-        const value = typeof opt.value === 'string' ? opt.value
-          : typeof opt.name === 'string' ? opt.name : null;
-        if (!value) return [];
-        return [{
-          id: typeof opt.id === 'string' ? opt.id : `${group.name}:${value}`,
-          value,
-          priceDeltaCents: Number(opt.price_delta_cents ?? 0) || 0,
-          inventoryCount: Number(opt.inventory_count ?? 0) || 0,
-          sku: typeof opt.sku === 'string' ? opt.sku : null,
-        }];
-      }),
-    }];
-  });
-}
 
 export async function getFeedSlice(
   db: SupabaseClient,
@@ -96,18 +66,7 @@ export async function getFeedSlice(
   // Blocks are a hard filter (spec 2.2): a viewer who said not_interested on a
   // video or a seller must never see them again. Read first so it can be
   // applied as a negative filter rather than post-filtered after paging.
-  const { data: blocks } = await db
-    .from('viewer_blocks')
-    .select('subject_type, subject_id')
-    .eq('anon_id', params.anonId)
-    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
-
-  const blockedVideos = new Set<string>();
-  const blockedSellers = new Set<string>();
-  for (const b of blocks ?? []) {
-    if (b.subject_type === 'video') blockedVideos.add(b.subject_id as string);
-    if (b.subject_type === 'seller') blockedSellers.add(b.subject_id as string);
-  }
+  const { blockedVideos, blockedSellers } = await loadViewerBlocks(db, params.anonId);
 
   const excluded = new Set([...params.excludeIds, ...blockedVideos]);
 
@@ -127,14 +86,16 @@ export async function getFeedSlice(
       id, seller_id, mux_playback_id, duration_seconds, aspect_ratio,
       thumbnail_url, caption, hashtags, published_at,
       categories!inner ( slug ),
-      profiles!inner ( id, handle, display_name, avatar_url, charges_enabled ),
+      profiles!inner ( id, handle, display_name, avatar_url,
+        seller_payments!inner ( charges_enabled ) ),
       video_products ( position, pinned_at_second,
         products ( id, title, price_cents, compare_at_price_cents, inventory_count,
                    low_stock_threshold, images, variants, status ) )
     `)
     .eq('status', 'live')
-    // Seller must actually be able to take money (spec 2.2).
-    .eq('profiles.charges_enabled', true)
+    // Seller must actually be able to take money (spec 2.2). charges_enabled
+    // lives on seller_payments, not profiles — see the VideoRow comment.
+    .eq('profiles.seller_payments.charges_enabled', true)
     .not('published_at', 'is', null)
     .order('published_at', { ascending: false })
     .limit(overFetch);
@@ -162,25 +123,7 @@ export async function getFeedSlice(
     if (!v.profiles) continue;
 
     // "At least one attached product with status active AND inventory > 0."
-    const products: FeedProduct[] = (v.video_products ?? [])
-      .filter((vp) => vp.products && vp.products.status === 'active' && vp.products.inventory_count > 0)
-      .sort((a, b) => a.position - b.position)
-      .slice(0, 5) // a video sells 1-5 products
-      .map((vp) => {
-        const p = vp.products!;
-        return {
-          id: p.id,
-          title: p.title,
-          priceCents: p.price_cents,
-          compareAtPriceCents: p.compare_at_price_cents,
-          inventoryCount: p.inventory_count,
-          lowStockThreshold: p.low_stock_threshold,
-          images: p.images ?? [],
-          variants: toVariantGroups(p.variants),
-          position: vp.position,
-          pinnedAtSecond: vp.pinned_at_second,
-        };
-      });
+    const products = shapeSellableProducts(v.video_products);
 
     if (products.length === 0) continue;
 

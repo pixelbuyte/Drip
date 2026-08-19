@@ -40,7 +40,20 @@ cp .env.local.example .env.local   # fill in keys
 npm run dev
 ```
 
-Run the SQL migrations in `supabase/migrations/` (in order) against your Supabase project. Forward webhooks locally:
+**Migrations.** On a **fresh** Supabase project, apply the files in
+`supabase/migrations/` in plain filename order (00001, 00002, 00006, 00007, …) —
+`supabase db push` does exactly this. Filename order is the correct order by
+construction: `00006_reconcile_forked_schema.sql` carries guards that bring a
+fresh database up to the shape the later files assume. Never apply anything in
+`supabase/migrations/_abandoned_fork/` — see the README inside it.
+
+Against the **existing production project** (which already ran 00001, 00002,
+and five out-of-band June migrations recorded under timestamp versions),
+`supabase db push` will NOT work — its migration history doesn't line up with
+these filenames. Apply `00006_reconcile_forked_schema.sql` onward by hand (SQL
+editor or MCP `apply_migration`), one file per transaction, in filename order.
+
+Forward webhooks locally:
 
 ```bash
 stripe listen --forward-to localhost:3000/api/webhooks/stripe

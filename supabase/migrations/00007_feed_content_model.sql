@@ -320,7 +320,7 @@ INSERT INTO public.seller_trust (seller_id) SELECT id FROM public.profiles
 --
 -- Two consequences that an empty drops table hides:
 --   * the live drop has no video (mux_playback_id IS NULL), so mapping
---     active -> 'live' would violate videos_live_has_playback. 00012 section 4
+--     active -> 'live' would violate videos_live_has_playback. the reconcile migration (00006) section 4
 --     demotes such rows to 'processing' BEFORE this file runs.
 --   * the video_products insert queues a deferred constraint-trigger event,
 --     which blocks a later ALTER TABLE. See SET CONSTRAINTS below.
@@ -409,9 +409,24 @@ ALTER TABLE public.orders
   ADD COLUMN refunded_at      timestamptz,
   ADD COLUMN disputed_at      timestamptz;
 
+-- Feed purchases are PaymentIntent-only (spec 3.5: checkout never leaves the
+-- feed, so there is no Checkout Session). 00001 made stripe_session_id NOT
+-- NULL, which would make every feed order UNINSERTABLE — the webhook's write
+-- would fail 23502 forever. The UNIQUE constraint stays: Postgres treats
+-- NULLs as distinct, so session-less orders don't collide; PaymentIntent
+-- orders get their own uniqueness from idx_orders_payment_intent below.
+ALTER TABLE public.orders ALTER COLUMN stripe_session_id DROP NOT NULL;
+
+-- amount_cents is Stripe's session.amount_total — the legacy checkout charges
+-- shipping as a LINE ITEM, so amount_cents already INCLUDES shipping_cents.
+-- The first version of this backfill wrote subtotal = amount and
+-- total = amount + shipping, double-counting shipping into both; the money
+-- screens then presented a $46.00 charge as $52.00. Item subtotal is the
+-- charge minus shipping (floored at 0 against malformed legacy rows), and
+-- the total IS the charge.
 UPDATE public.orders SET video_id = drop_id,
-                         subtotal_cents = amount_cents,
-                         total_cents = amount_cents + shipping_cents;
+                         subtotal_cents = greatest(amount_cents - shipping_cents, 0),
+                         total_cents = amount_cents;
 
 -- 2.9 needs a status vocabulary that can express "retroactively subtract this
 -- order's commerce contribution".
@@ -507,6 +522,51 @@ BEGIN
 END
 $drops_video_url$;
 
+-- Pre-flight: fail EARLY and legibly if anything still depends on drops.
+-- The production evidence behind the harness replica enumerated TABLES only;
+-- the out-of-band mvp_storefront_and_security migration may have created a
+-- view or function over drops that no local run can see. A bare DROP TABLE
+-- would then fail with a terse dependency error mid-file; this names every
+-- dependent object first so the operator knows exactly what to reconcile.
+-- (DROP ... CASCADE is deliberately NOT the fix: silently destroying an
+-- unknown production object is the failure mode, not the remedy.)
+DO $drops_deps$
+DECLARE
+  deps text;
+BEGIN
+  SELECT string_agg(DISTINCT dep, '; ')
+    INTO deps
+    FROM (
+      -- Views/matviews whose rewrite rules reference drops.
+      SELECT format('%s %s', CASE c.relkind WHEN 'v' THEN 'view' ELSE 'matview' END,
+                    c.oid::regclass) AS dep
+        FROM pg_rewrite rw
+        JOIN pg_depend d ON d.objid = rw.oid AND d.classid = 'pg_rewrite'::regclass
+        JOIN pg_class c ON c.oid = rw.ev_class
+       WHERE d.refobjid = 'public.drops'::regclass
+         AND c.oid <> 'public.drops'::regclass
+      UNION ALL
+      -- Any other pg_depend edge onto drops from outside the table itself
+      -- (functions recorded as depending on it, foreign tables, etc.),
+      -- excluding the table's own subobjects, indexes, constraints, triggers,
+      -- policies, sequences and the FKs this migration already handles.
+      SELECT format('%s (oid %s)', d.classid::regclass, d.objid)
+        FROM pg_depend d
+       WHERE d.refobjid = 'public.drops'::regclass
+         AND d.deptype = 'n'
+         AND d.classid NOT IN ('pg_constraint'::regclass, 'pg_trigger'::regclass,
+                               'pg_policy'::regclass, 'pg_class'::regclass,
+                               'pg_attrdef'::regclass, 'pg_rewrite'::regclass)
+    ) x;
+
+  IF deps IS NOT NULL THEN
+    RAISE EXCEPTION USING
+      message = format('Cannot DROP public.drops: dependent objects exist that this chain does not know about: %s', deps),
+      hint    = 'These came from an out-of-band production migration. Reconcile each one (drop it deliberately or migrate it) before re-running.';
+  END IF;
+END
+$drops_deps$;
+
 DROP TABLE public.drops;
 
 -- Replacement, same shape and same posture as 00004/00006: a single
@@ -566,7 +626,7 @@ GRANT UPDATE (name, weight_oz, length_in, width_in, height_in, handling_days, is
 -- the seller's physical home address must never sit in a table that every
 -- anonymous storefront request already reads. That split is the design we keep.
 --
--- Read the flag through public.seller_charges_enabled(uuid) (00012 section 5)
+-- Read the flag through public.seller_charges_enabled(uuid) (00006_reconcile section 5)
 -- rather than querying seller_payments inline here. A policy expression is
 -- evaluated with the QUERYING role's privileges, and seller_payments is
 -- REVOKE ALL from anon, so an inline EXISTS over it would create fine at

@@ -37,6 +37,31 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let sessionId: string | null = null;
 let surface: FeedSurface = 'for_you';
 
+/**
+ * Adopt a server-minted session id (the SSR page generates one per render,
+ * records the first slice under it, and hands it to the shell). Adopting it
+ * makes every event this page emits carry the SAME sid the slice was
+ * recorded under — which is what lets the ingest join resolve each
+ * impression's lane. Without adoption, the SSR slice's impressions joined
+ * feed_slices on a sid that had no rows, lane came back NULL, and none of
+ * them ever counted toward the 500-impression exploration guarantee — and
+ * the 1-impression-per-viewer-per-video cap then burned that viewer's only
+ * countable impression for each of those videos, permanently.
+ *
+ * A page load IS a session under this model (each SSR render mints a fresh
+ * id). Nothing depended on cross-reload session continuity before: the
+ * shell's exclude list lives in component state and resets on reload anyway,
+ * and every abuse cap that matters is keyed per anon+video, not per session.
+ */
+export function adoptSessionId(id: string): void {
+  sessionId = id;
+  try {
+    sessionStorage.setItem('drip_sid', id);
+  } catch {
+    /* memory-only for this session */
+  }
+}
+
 /** v4 uuid in sessionStorage, falling back to memory: in-app browsers may
  *  partition or block storage entirely, and the spec says to assume so. */
 export function getSessionId(): string {
