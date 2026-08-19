@@ -116,13 +116,13 @@ function _compileTimeLocks(): void {
   };
 
   // ...and forbidden on the helping one, so it cannot be parked out of sight.
-  // @ts-expect-error — a helping factor may not carry a lever.
   const misplaced: HelpingFactor = {
     key: 'freshness',
     direction: 'helping',
     label: 'Freshness',
     detail: 'posted 3h ago',
     contribution: 0.09,
+    // @ts-expect-error — a helping factor may not carry a lever.
     lever: 'post again',
   };
 
