@@ -131,6 +131,35 @@ describe('recordFeedEventsForAffinity', () => {
     expect(row?.scored_impressions).toBe(4);
   });
 
+  it('counts one scored impression PER watched video, not per batch', async () => {
+    // The 20-impression cold-start gate counts videos watched; a batch can
+    // carry several. A flat +1 per batch made binge viewers take many times
+    // longer to leave cold start.
+    let upserted: Record<string, unknown> | null = null;
+    const db = sourceOf({
+      videos: [
+        { id: 'v1', seller_id: 's1', category_id: 'c1', hashtags: [] },
+        { id: 'v2', seller_id: 's1', category_id: 'c1', hashtags: [] },
+      ],
+      viewerProfile: {
+        category_affinity: {},
+        seller_affinity: {},
+        hashtag_affinity: {},
+        price_band: null,
+        scored_impressions: 3,
+        updated_at: '2026-08-09T00:00:00Z',
+      },
+      onUpsert: (row) => { upserted = row; },
+    });
+    const events: RawFeedEvent[] = [
+      { t: 'watch_progress', v: 'v1', wm: 9500, dm: 10000 },
+      { t: 'watch_progress', v: 'v2', wm: 6000, dm: 10000 },
+    ];
+    await recordFeedEventsForAffinity(db, { anonId: 'a1', events, now: NOW });
+    const row = upserted as unknown as { scored_impressions: number } | null;
+    expect(row?.scored_impressions).toBe(5); // 3 + one watch95 + one watch50
+  });
+
   it('watch_progress below 50% completion maps to nothing', async () => {
     let called = false;
     const db = sourceOf({

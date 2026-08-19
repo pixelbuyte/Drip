@@ -1269,3 +1269,60 @@ describe('select — spec 6.6 changes nothing until you ask for it', () => {
     expect(after.draws()).toBe(before.draws());
   });
 });
+
+describe('select — constraint 2 is tunable via maxPerSeller', () => {
+  /** A pool dominated by one seller, with enough other-seller material that
+   *  a slice can always complete without relaxing constraint 2. */
+  function dominatedPool(): ScoredCandidate[] {
+    const dominant = Array.from({ length: 12 }, (_, i) =>
+      sc({
+        videoId: `dom${String(i).padStart(2, '0')}`,
+        sellerId: 'dominant',
+        categoryId: `c${i % 6}`,
+        minPriceCents: PRICES[i % 3],
+        score: 2 - i / 100, // the strongest candidates in the pool
+      })
+    );
+    const rest = Array.from({ length: 40 }, (_, i) =>
+      sc({
+        videoId: `bg${String(i).padStart(2, '0')}`,
+        sellerId: `bg-s${i % 20}`,
+        categoryId: `c${i % 6}`,
+        minPriceCents: PRICES[i % 3],
+        score: 1 - i / 40,
+      })
+    );
+    return [...dominant, ...rest];
+  }
+
+  const countDominant = (slice: readonly ScoredCandidate[]) =>
+    slice.filter((c) => c.sellerId === 'dominant').length;
+
+  it('defaults to the spec cap of 2 when the option is omitted', () => {
+    for (let seed = 0; seed < 10; seed += 1) {
+      const r = select(dominatedPool(), ctx(), opts({ seed }));
+      expect(r.relaxed).not.toContain(2);
+      expect(countDominant(r.slice)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  it('honors a higher cap — the feed_weights max_per_seller_per_slice knob is live', () => {
+    let sawMoreThanTwo = false;
+    for (let seed = 0; seed < 20; seed += 1) {
+      const r = select(dominatedPool(), ctx(), opts({ seed, maxPerSeller: 4 }));
+      expect(r.relaxed).not.toContain(2);
+      const n = countDominant(r.slice);
+      expect(n).toBeLessThanOrEqual(4);
+      if (n > 2) sawMoreThanTwo = true;
+    }
+    // The dominant seller has the highest scores in the pool: if the raised
+    // cap never once admitted a third video, the knob is not actually wired.
+    expect(sawMoreThanTwo).toBe(true);
+  });
+
+  it('floors a nonsense cap at 1 rather than allowing 0-per-seller (an empty slice)', () => {
+    const r = select(dominatedPool(), ctx(), opts({ maxPerSeller: 0 }));
+    expect(r.slice.length).toBeGreaterThan(0);
+    expect(countDominant(r.slice)).toBeLessThanOrEqual(1);
+  });
+});

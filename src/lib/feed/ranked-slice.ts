@@ -283,6 +283,7 @@ export async function getRankedFeedSlice(
     rng: mulberry32(fnv1a32(`sel:${params.sessionId}:${offset}`)),
     sliceSize: Math.max(0, Math.min(limit, active.slice.sliceSize)),
     freshFloor: active.slice.minFreshPerSlice,
+    maxPerSeller: active.slice.maxPerSellerPerSlice,
     budgetOwed: budgetOwedIds(scored, now),
   });
 

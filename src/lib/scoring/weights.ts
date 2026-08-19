@@ -191,7 +191,17 @@ export function pickWeightsRow(
   rows: readonly FeedWeightsRow[],
   bucketValue: number
 ): FeedWeightsRow | null {
-  const active = rows.filter(isActive);
+  // Sorted by variant name before the cumulative walk, deliberately: the
+  // loader's SELECT carries no ORDER BY, and Postgres heap order is not
+  // stable (a plain UPDATE can move a tuple). Cumulative bucketing against
+  // an unstable row order would flip the same viewer between variants from
+  // one request to the next — the exact thing stable bucketing exists to
+  // prevent. Variant names are UNIQUE (00009), so this order is total.
+  const active = rows.filter(isActive).slice().sort((a, b) => {
+    const av = variantName(a);
+    const bv = variantName(b);
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
   if (active.length === 0) return null;
 
   const b = Number.isFinite(bucketValue) ? Math.min(Math.max(bucketValue, 0), 1) : 0;

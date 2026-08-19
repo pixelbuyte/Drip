@@ -84,7 +84,17 @@ export type RelaxableConstraint = (typeof RELAX_ORDER)[number];
  * starves everyone else.
  */
 
-type Active = { c1: boolean; c2: boolean; c3: boolean; c6: boolean; c7: boolean };
+type Active = {
+  c1: boolean;
+  c2: boolean;
+  c3: boolean;
+  c6: boolean;
+  c7: boolean;
+  /** Constraint 2's cap. The spec's default is 2; feed_weights carries a
+   *  max_per_seller_per_slice column so a variant can tune it — a knob that
+   *  was silently dead until this field existed. */
+  maxPerSeller: number;
+};
 
 function violates(
   cand: ScoredCandidate,
@@ -96,11 +106,11 @@ function violates(
     return true;
   }
 
-  // 2: at most 2 from one seller per slice.
+  // 2: at most maxPerSeller (spec default 2) from one seller per slice.
   if (active.c2) {
     let n = 0;
     for (const p of placed) if (p.sellerId === cand.sellerId) n += 1;
-    if (n >= 2) return true;
+    if (n >= active.maxPerSeller) return true;
   }
 
   // 3: at most 4 consecutive from one category. An uncategorised video (null)
@@ -449,6 +459,13 @@ export type SelectOptions = {
   freshFloor?: number;
   /** Default SELECTION.FRESH_CEILING (6). Raised to the floor if set below it. */
   freshCeiling?: number;
+  /**
+   * Constraint 2's per-seller cap. Default 2, the spec's number — passing the
+   * default changes nothing. Exists so feed_weights.max_per_seller_per_slice
+   * (a per-variant column the schema has carried since 00009) actually
+   * reaches the selector instead of being a dead knob. Floored at 1.
+   */
+  maxPerSeller?: number;
 };
 
 /** Most unseen-seller replacements to try before giving up on constraint 7. */
@@ -681,7 +698,14 @@ export function select(
     return { placed, drew };
   };
 
-  const active: Active = { c1: true, c2: true, c3: true, c6: true, c7: true };
+  const active: Active = {
+    c1: true,
+    c2: true,
+    c3: true,
+    c6: true,
+    c7: true,
+    maxPerSeller: Math.max(1, Math.floor(numOr(opts.maxPerSeller, 2))),
+  };
   const target = attainableTarget(pool, sliceSize, freshFloor, freshCeiling);
 
   let sampled = false;

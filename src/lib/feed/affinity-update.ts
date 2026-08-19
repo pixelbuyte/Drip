@@ -197,9 +197,14 @@ export async function recordFeedEventsForAffinity(
       // claims — see NO_NEIGHBOURS's own doc comment.
     });
 
-    const scoredImpressionDelta = viewerEvents.some((e) => e.type === 'watch95' || e.type === 'watch50')
-      ? 1
-      : 0;
+    // One scored impression per WATCHED VIDEO, not per batch: the
+    // 20-impression cold-start gate (viewer_profiles.scored_impressions)
+    // counts videos the viewer actually watched, and a batch can carry
+    // several — flat +1 per batch made a binge-watching viewer take many
+    // times longer to leave cold start than the spec intends.
+    const scoredImpressionDelta = viewerEvents.filter(
+      (e) => e.type === 'watch95' || e.type === 'watch50'
+    ).length;
 
     const { error } = await db.from('viewer_profiles').upsert(
       {

@@ -218,6 +218,20 @@ describe('pickWeightsRow', () => {
     const picks = Array.from({ length: 20 }, () => pickWeightsRow(rows, 0.75)?.variant);
     expect(new Set(picks).size).toBe(1);
   });
+
+  it('does not depend on the ROW ORDER the database happened to return', () => {
+    // The loader's SELECT has no ORDER BY and Postgres heap order is not
+    // stable — a plain UPDATE can move a tuple. If cumulative bucketing
+    // walked rows in arrival order, the same viewer would flip variants
+    // between requests whenever the order changed.
+    const a = controlRow({ variant: 'control', traffic_share: '0.700' });
+    const b = controlRow({ variant: 'ranked_v2', traffic_share: '0.300' });
+    for (const bucket of [0, 0.1, 0.35, 0.69, 0.71, 0.95, 0.999]) {
+      expect(pickWeightsRow([a, b], bucket)?.variant).toBe(
+        pickWeightsRow([b, a], bucket)?.variant
+      );
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

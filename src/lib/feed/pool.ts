@@ -179,13 +179,24 @@ function toPoolProducts(rows: readonly ProductRow[] | null): PoolProduct[] {
 }
 
 export async function loadPool(db: SupabaseClient, opts: LoadPoolOptions): Promise<PoolVideo[]> {
+  // The categories embed is !inner ONLY when filtering by slug. In PostgREST,
+  // a filter on a non-inner embed does NOT restrict the parent rows — it just
+  // nulls the embed — so `.eq('categories.slug', …)` against a plain embed
+  // silently returned the whole catalogue for a category-scoped feed. But
+  // making it !inner unconditionally would drop uncategorized videos
+  // (category_id is nullable) from the general pool, so the join tightens
+  // only when the filter needs it to.
+  const categoriesEmbed = opts.categorySlug
+    ? 'categories!inner ( slug, live_video_count )'
+    : 'categories ( live_video_count )';
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query: any = db
     .from('videos')
     .select(`
       id, seller_id, category_id, published_at, hashtags, status,
-      profiles!inner ( seller_payments!inner ( charges_enabled ) ),
-      categories ( live_video_count ),
+      profiles!inner ( handle, seller_payments!inner ( charges_enabled ) ),
+      ${categoriesEmbed},
       video_stats ( impressions_1h, impressions_24h, impressions_all,
         purchases_1h, purchases_24h, add_to_carts_1h, add_to_carts_24h,
         product_taps_1h, product_taps_24h, completions_24h,
@@ -203,6 +214,7 @@ export async function loadPool(db: SupabaseClient, opts: LoadPoolOptions): Promi
     .limit(Math.max(1, opts.poolSize));
 
   if (opts.categorySlug) query = query.eq('categories.slug', opts.categorySlug);
+  // profiles IS !inner, so this one does restrict parent rows.
   if (opts.sellerHandle) query = query.eq('profiles.handle', opts.sellerHandle);
 
   const { data, error } = (await query) as { data: PoolVideoRow[] | null; error: { message: string } | null };

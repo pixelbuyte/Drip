@@ -3,10 +3,16 @@ import { loadPool } from '../pool';
 import { SHIPS_WORLDWIDE } from '@/lib/scoring/candidates';
 import { IMPRESSION_BUDGET_TOTAL } from '@/lib/scoring/types';
 
-/** A minimal structural double for the supabase-js query builder chain. */
-function sourceOf(rows: unknown[]) {
+/** A minimal structural double for the supabase-js query builder chain.
+ *  `seen` captures the select string, so tests can assert on the join shape
+ *  PostgREST will actually receive — the one thing a structural mock would
+ *  otherwise be blind to. */
+function sourceOf(rows: unknown[], seen?: { select?: string }) {
   const builder = {
-    select: () => builder,
+    select: (columns: string) => {
+      if (seen) seen.select = columns;
+      return builder;
+    },
     eq: () => builder,
     not: () => builder,
     order: () => builder,
@@ -229,5 +235,34 @@ describe('loadPool row mapping', () => {
   it('returns [] on an empty result set', async () => {
     const out = await loadPool(sourceOf([]), { poolSize: 500, now: NOW });
     expect(out).toEqual([]);
+  });
+});
+
+describe('loadPool join shape', () => {
+  it('uses a plain categories embed when no category filter is set (uncategorized videos stay in the pool)', async () => {
+    const seen: { select?: string } = {};
+    await loadPool(sourceOf([baseRow()], seen), { poolSize: 500, now: NOW });
+    expect(seen.select).toContain('categories (');
+    expect(seen.select).not.toContain('categories!inner');
+  });
+
+  it('tightens categories to !inner when filtering by slug — a filter on a non-inner embed does not restrict parent rows in PostgREST', async () => {
+    const seen: { select?: string } = {};
+    await loadPool(sourceOf([baseRow()], seen), {
+      poolSize: 500,
+      now: NOW,
+      categorySlug: 'apparel',
+    });
+    expect(seen.select).toContain('categories!inner ( slug, live_video_count )');
+  });
+
+  it('profiles stays !inner (its handle filter restricts parents) and selects handle', async () => {
+    const seen: { select?: string } = {};
+    await loadPool(sourceOf([baseRow()], seen), {
+      poolSize: 500,
+      now: NOW,
+      sellerHandle: 'shophandle',
+    });
+    expect(seen.select).toContain('profiles!inner ( handle, seller_payments!inner ( charges_enabled ) )');
   });
 });

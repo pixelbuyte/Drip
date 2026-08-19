@@ -83,10 +83,16 @@ export default function FeedShell({
       if (!res.ok) return;
       const data = (await res.json()) as FeedResponse;
       cursor.current = data.nextBefore;
-      // An empty slice with a cursor still pointing somewhere means this page
-      // filtered down to nothing, not that the feed ended — ask again.
-      if (data.items.length === 0 && !data.nextBefore) setExhausted(true);
-      else if (data.items.length > 0) setItems((prev) => [...prev, ...data.items]);
+      // The exclude list is capped at 200 ids, so a long session (or a search
+      // with more matches than that) can be served a video already in the
+      // buffer. Re-appending it would duplicate React keys and, on the
+      // cursorless surfaces, loop the same page forever — so dedupe against
+      // what is already here, and a page that yields nothing NEW counts as
+      // the end.
+      const have = new Set(items.map((i) => i.videoId));
+      const fresh = data.items.filter((i) => !have.has(i.videoId));
+      if (fresh.length === 0 && !data.nextBefore) setExhausted(true);
+      else if (fresh.length > 0) setItems((prev) => [...prev, ...fresh]);
     } catch {
       /* the shell keeps whatever it has; the viewer sees no error mid-scroll */
     } finally {
