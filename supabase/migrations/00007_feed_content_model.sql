@@ -409,9 +409,24 @@ ALTER TABLE public.orders
   ADD COLUMN refunded_at      timestamptz,
   ADD COLUMN disputed_at      timestamptz;
 
+-- Feed purchases are PaymentIntent-only (spec 3.5: checkout never leaves the
+-- feed, so there is no Checkout Session). 00001 made stripe_session_id NOT
+-- NULL, which would make every feed order UNINSERTABLE — the webhook's write
+-- would fail 23502 forever. The UNIQUE constraint stays: Postgres treats
+-- NULLs as distinct, so session-less orders don't collide; PaymentIntent
+-- orders get their own uniqueness from idx_orders_payment_intent below.
+ALTER TABLE public.orders ALTER COLUMN stripe_session_id DROP NOT NULL;
+
+-- amount_cents is Stripe's session.amount_total — the legacy checkout charges
+-- shipping as a LINE ITEM, so amount_cents already INCLUDES shipping_cents.
+-- The first version of this backfill wrote subtotal = amount and
+-- total = amount + shipping, double-counting shipping into both; the money
+-- screens then presented a $46.00 charge as $52.00. Item subtotal is the
+-- charge minus shipping (floored at 0 against malformed legacy rows), and
+-- the total IS the charge.
 UPDATE public.orders SET video_id = drop_id,
-                         subtotal_cents = amount_cents,
-                         total_cents = amount_cents + shipping_cents;
+                         subtotal_cents = greatest(amount_cents - shipping_cents, 0),
+                         total_cents = amount_cents;
 
 -- 2.9 needs a status vocabulary that can express "retroactively subtract this
 -- order's commerce contribution".
