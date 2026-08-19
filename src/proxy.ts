@@ -39,7 +39,15 @@ export async function proxy(request: NextRequest) {
   const verified = existing ? await verifyAnonId(existing) : null;
   if (verified) return NextResponse.next();
 
-  const { anonId, cookieValue } = await mintAnonId();
+  const minted = await mintAnonId();
+
+  // Identity is unconfigured (no ANON_ID_SECRET). Serve the page anyway.
+  // Attribution is lost until the secret is set; the site staying up is worth
+  // more than the impression data, and this used to throw here — taking every
+  // route in the matcher, the landing page included, down with it.
+  if (!minted) return NextResponse.next();
+
+  const { anonId, cookieValue } = minted;
 
   // Hand the freshly minted id to this same request so the server render and
   // any route handler it calls agree on the identity.

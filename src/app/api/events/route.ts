@@ -126,11 +126,17 @@ export async function POST(request: NextRequest) {
   // issued the request. issued_ip_hash stayed null for every identity, which
   // would have quietly disabled the provenance half of the anti-gaming work.
   try {
-    await supabase
-      .from('viewer_identities')
-      .update({ issued_ip_hash: await hashIp(ip) })
-      .eq('anon_id', anonId)
-      .is('issued_ip_hash', null);
+    // Null when ANON_ID_SECRET is unset. Skip the write rather than storing an
+    // unsalted hash — sha256 over the IPv4 space is brute-forceable in seconds,
+    // so an unsalted "hash" is a raw address wearing a costume.
+    const ipHash = await hashIp(ip);
+    if (ipHash) {
+      await supabase
+        .from('viewer_identities')
+        .update({ issued_ip_hash: ipHash })
+        .eq('anon_id', anonId)
+        .is('issued_ip_hash', null);
+    }
   } catch (err) {
     console.error('issued_ip_hash write failed:', err);
   }
