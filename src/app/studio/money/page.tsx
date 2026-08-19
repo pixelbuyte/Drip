@@ -237,7 +237,7 @@ async function loadMoney(): Promise<MoneyData | null> {
 
   // ── The seller ──────────────────────────────────────────────────────────
   // Payment state comes from `seller_payments`, and it is read with the
-  // SERVICE ROLE: 00012 revokes every privilege on that table from `anon` and
+  // SERVICE ROLE: The reconcile migration (00006) revokes every privilege on that table from `anon` and
   // `authenticated` (it holds the payout destination and the seller's home
   // address), so a caller-scoped read returns nothing and would render a
   // false "payouts not connected" alarm on every screen. Every other route

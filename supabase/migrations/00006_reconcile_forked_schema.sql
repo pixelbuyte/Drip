@@ -1,11 +1,32 @@
 -- =============================================================================
--- 00012_reconcile_forked_schema.sql
+-- 00006_reconcile_forked_schema.sql   (formerly 00012 — see NUMBERING below)
 --
 -- WHY THIS FILE EXISTS
 -- --------------------
 -- In June 2026 this repo's migration chain and the live Supabase project
 -- (tkppdmrkvyjixaiocwmd) forked. They have described two different schemas
 -- ever since. This migration is the join point that makes them one again.
+--
+-- NUMBERING: THE FILENAME ORDER IS THE APPLY ORDER
+-- ------------------------------------------------
+-- This file was first written as 00012, which encoded a trap: every
+-- version-ordered apply mechanism (`supabase db push`, CI replay, a dev
+-- following the README) sorts by filename, and in that order the abandoned
+-- fork migrations 00003-00006 ran FIRST — committing several fork-order
+-- changes against the production shape before wedging at 00006's reference
+-- to profiles.from_address, with this file never reached. The only order
+-- that works (this file, THEN 00007 onward) existed nowhere in the
+-- artifact; it lived in session tooling. Reproduced, not hypothesized: the
+-- filename-order replay against a production replica commits 00003-00005
+-- and then halts half-applied.
+--
+-- So the fork files moved to _abandoned_fork/ (never to be applied — the
+-- sections below replay everything in them that still matters), and this
+-- file is numbered 00006 so that plain filename order IS the proven order:
+--     00001, 00002, 00006 (this file), 00007 ... onward.
+-- Section 0 additionally makes this file apply on a FRESH database (00001 +
+-- 00002 only), so the same filename-ordered chain works for a new dev or CI
+-- environment, not just for production's out-of-band shape.
 --
 -- What production actually ran:
 --     20260612224627  initial_schema                <- repo 00001
@@ -92,6 +113,67 @@
 -- Written to be re-runnable: this migration reconciles a divergence, which is
 -- exactly the kind that gets interrupted half-way and re-applied.
 -- =============================================================================
+
+
+-- =============================================================================
+-- SECTION 0 -- fresh-database replay of the June out-of-band shape
+-- =============================================================================
+-- Production got these from the five out-of-band migrations; a fresh database
+-- (00001 + 00002 only) has none of them, and later sections assume them:
+-- section 6b ALTERs seller_payments, section 6d's column grants name
+-- drops.video_url / image_url, and the PII-split design decision at the top of
+-- this file requires the three secret columns OFF profiles. Every statement
+-- here is guarded, so on production — where the out-of-band migrations already
+-- ran — this whole section is a no-op.
+
+-- 20260613050858 mvp_storefront_and_security's net schema effect.
+ALTER TABLE public.drops ADD COLUMN IF NOT EXISTS video_url TEXT;
+ALTER TABLE public.drops ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- 20260613133236 split_seller_pii: the table the split moved the secrets to.
+CREATE TABLE IF NOT EXISTS public.seller_payments (
+  seller_id         UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  stripe_account_id TEXT UNIQUE,
+  charges_enabled   BOOLEAN NOT NULL DEFAULT FALSE,
+  from_address      JSONB,
+  created_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_seller_payments_stripe_account_id
+  ON public.seller_payments(stripe_account_id);
+
+DROP TRIGGER IF EXISTS seller_payments_updated_at ON public.seller_payments;
+CREATE TRIGGER seller_payments_updated_at
+  BEFORE UPDATE ON public.seller_payments
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- The split itself: carry any existing sellers across, then remove the
+-- columns. Dynamic SQL on purpose — on production these columns are already
+-- gone, and the guard must not even PARSE a reference to them there.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'profiles'
+       AND column_name = 'stripe_account_id'
+  ) THEN
+    EXECUTE $sql$
+      INSERT INTO public.seller_payments
+        (seller_id, stripe_account_id, charges_enabled, from_address, created_at, updated_at)
+      SELECT id, stripe_account_id, COALESCE(charges_enabled, FALSE), from_address,
+             created_at, updated_at
+        FROM public.profiles
+      ON CONFLICT (seller_id) DO NOTHING
+    $sql$;
+    EXECUTE 'ALTER TABLE public.profiles
+               DROP COLUMN stripe_account_id,
+               DROP COLUMN charges_enabled,
+               DROP COLUMN from_address';
+  END IF;
+END
+$$;
 
 
 -- =============================================================================

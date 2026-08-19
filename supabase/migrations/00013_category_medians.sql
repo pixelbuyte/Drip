@@ -249,23 +249,6 @@ $seed$;
 -- -----------------------------------------------------------------------------
 -- 5. Scheduling
 -- -----------------------------------------------------------------------------
--- Same conditional shape as 00009: pg_cron exists on Supabase but not on a bare
--- Postgres, so the migration must apply identically in CI and on a developer's
--- machine, where the job simply is not scheduled.
---
--- Hourly, not every minute. A category median is a distributional statistic over
--- thousands of videos; it does not move measurably inside an hour, and this is a
--- full scan of the live catalogue rather than 00009's watermarked delta. Offset
--- to :23 so it does not pile onto the top-of-hour jobs.
-DO $cron$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
-    CREATE EXTENSION IF NOT EXISTS pg_cron;
-
-    PERFORM cron.schedule('category-rate-medians', '23 * * * *',
-      $$SELECT public.refresh_category_rate_medians()$$);
-  ELSE
-    RAISE NOTICE 'pg_cron unavailable — category median refresh not scheduled (expected outside Supabase)';
-  END IF;
-END
-$cron$;
+-- Moved to 00016_schedule_cron_jobs.sql, together with 00009's jobs and for
+-- the same reason: a pg_cron extension failure must cost "jobs not scheduled
+-- yet", never a rollback of this file's schema work. See 00016's header.

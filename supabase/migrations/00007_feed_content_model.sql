@@ -320,7 +320,7 @@ INSERT INTO public.seller_trust (seller_id) SELECT id FROM public.profiles
 --
 -- Two consequences that an empty drops table hides:
 --   * the live drop has no video (mux_playback_id IS NULL), so mapping
---     active -> 'live' would violate videos_live_has_playback. 00012 section 4
+--     active -> 'live' would violate videos_live_has_playback. the reconcile migration (00006) section 4
 --     demotes such rows to 'processing' BEFORE this file runs.
 --   * the video_products insert queues a deferred constraint-trigger event,
 --     which blocks a later ALTER TABLE. See SET CONSTRAINTS below.
@@ -507,6 +507,51 @@ BEGIN
 END
 $drops_video_url$;
 
+-- Pre-flight: fail EARLY and legibly if anything still depends on drops.
+-- The production evidence behind the harness replica enumerated TABLES only;
+-- the out-of-band mvp_storefront_and_security migration may have created a
+-- view or function over drops that no local run can see. A bare DROP TABLE
+-- would then fail with a terse dependency error mid-file; this names every
+-- dependent object first so the operator knows exactly what to reconcile.
+-- (DROP ... CASCADE is deliberately NOT the fix: silently destroying an
+-- unknown production object is the failure mode, not the remedy.)
+DO $drops_deps$
+DECLARE
+  deps text;
+BEGIN
+  SELECT string_agg(DISTINCT dep, '; ')
+    INTO deps
+    FROM (
+      -- Views/matviews whose rewrite rules reference drops.
+      SELECT format('%s %s', CASE c.relkind WHEN 'v' THEN 'view' ELSE 'matview' END,
+                    c.oid::regclass) AS dep
+        FROM pg_rewrite rw
+        JOIN pg_depend d ON d.objid = rw.oid AND d.classid = 'pg_rewrite'::regclass
+        JOIN pg_class c ON c.oid = rw.ev_class
+       WHERE d.refobjid = 'public.drops'::regclass
+         AND c.oid <> 'public.drops'::regclass
+      UNION ALL
+      -- Any other pg_depend edge onto drops from outside the table itself
+      -- (functions recorded as depending on it, foreign tables, etc.),
+      -- excluding the table's own subobjects, indexes, constraints, triggers,
+      -- policies, sequences and the FKs this migration already handles.
+      SELECT format('%s (oid %s)', d.classid::regclass, d.objid)
+        FROM pg_depend d
+       WHERE d.refobjid = 'public.drops'::regclass
+         AND d.deptype = 'n'
+         AND d.classid NOT IN ('pg_constraint'::regclass, 'pg_trigger'::regclass,
+                               'pg_policy'::regclass, 'pg_class'::regclass,
+                               'pg_attrdef'::regclass, 'pg_rewrite'::regclass)
+    ) x;
+
+  IF deps IS NOT NULL THEN
+    RAISE EXCEPTION USING
+      message = format('Cannot DROP public.drops: dependent objects exist that this chain does not know about: %s', deps),
+      hint    = 'These came from an out-of-band production migration. Reconcile each one (drop it deliberately or migrate it) before re-running.';
+  END IF;
+END
+$drops_deps$;
+
 DROP TABLE public.drops;
 
 -- Replacement, same shape and same posture as 00004/00006: a single
@@ -566,7 +611,7 @@ GRANT UPDATE (name, weight_oz, length_in, width_in, height_in, handling_days, is
 -- the seller's physical home address must never sit in a table that every
 -- anonymous storefront request already reads. That split is the design we keep.
 --
--- Read the flag through public.seller_charges_enabled(uuid) (00012 section 5)
+-- Read the flag through public.seller_charges_enabled(uuid) (00006_reconcile section 5)
 -- rather than querying seller_payments inline here. A policy expression is
 -- evaluated with the QUERYING role's privileges, and seller_payments is
 -- REVOKE ALL from anon, so an inline EXISTS over it would create fine at

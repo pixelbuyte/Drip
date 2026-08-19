@@ -446,29 +446,10 @@ GRANT SELECT (video_id, likes_all, purchases_7d, purchases_all)
 -- column privileges are per-role, so "sellers see more of their own row" is
 -- not expressible in RLS. The dashboard route uses the service-role client.
 
--- Scheduling. pg_cron exists on Supabase but not on a bare Postgres, so the
--- whole block is conditional: the migration must apply identically in CI and
--- on a developer's local database, where the jobs simply are not scheduled.
-DO $cron$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
-    CREATE EXTENSION IF NOT EXISTS pg_cron;
-    
-    PERFORM cron.schedule('video-stats-rollup',      '* * * * *',
-      $$SELECT public.rollup_video_stats()$$);
-    PERFORM cron.schedule('feed-dedupe-sweep',       '*/5 * * * *',
-      $$SELECT public.sweep_feed_event_dedupe()$$);
-    PERFORM cron.schedule('category-counts',         '*/10 * * * *',
-      $$SELECT public.refresh_category_counts()$$);
-    PERFORM cron.schedule('feed-events-partitions',  '0 3 1 * *',
-      $$SELECT public.ensure_feed_events_partitions(3)$$);
-    PERFORM cron.schedule('feed-events-retention',   '30 3 1 * *',
-      $$SELECT public.drop_old_feed_events_partitions(6)$$);
-    PERFORM cron.schedule('viewer-counters-prune',   '0 4 * * 0',
-      $$DELETE FROM public.viewer_video_counters
-         WHERE last_event_at < now() - interval '180 days'$$);
-  ELSE
-    RAISE NOTICE 'pg_cron unavailable — rollup jobs not scheduled (expected outside Supabase)';
-  END IF;
-END
-$cron$;
+-- Scheduling moved to 00016_schedule_cron_jobs.sql, deliberately. The cron
+-- branch is the one place this file used to depend on the environment
+-- (pg_cron exists on Supabase, not on a bare Postgres), and CREATE EXTENSION
+-- pg_cron had never been executed by any local proof run — meaning a
+-- production-only extension failure would have rolled back ALL of this
+-- file's schema work mid-chain. Isolating the scheduling in its own final
+-- migration caps that blast radius at "jobs not scheduled yet".
