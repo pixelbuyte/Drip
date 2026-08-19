@@ -15,7 +15,13 @@ export async function GET() {
   }
 
   const [{ data: profile }, { data: orders }, { data: drops }] = await Promise.all([
-    supabase.from('profiles').select('stripe_account_id').eq('id', user.id).single(),
+    // stripe_account_id is on `seller_payments`, not `profiles` (profiles is
+    // publicly readable). maybeSingle: no row means onboarding never started.
+    supabase
+      .from('seller_payments')
+      .select('stripe_account_id')
+      .eq('seller_id', user.id)
+      .maybeSingle(),
     supabase
       .from('orders')
       .select('drop_id, amount_cents, status')

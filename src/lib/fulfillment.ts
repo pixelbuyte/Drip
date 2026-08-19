@@ -34,21 +34,31 @@ export async function fulfillOrder(
       return { ok: false, label_created: false, error: 'Order was refunded' };
     }
 
-    const [{ data: drop }, { data: seller }, { data: sellerUser }] = await Promise.all([
+    const [{ data: drop }, { data: seller }, { data: sellerPayments }, { data: sellerUser }] = await Promise.all([
       supabase
         .from('drops')
         .select('title, weight_oz, dimensions, slug')
         .eq('id', order.drop_id)
         .single(),
+      // Identity and address are separate tables: from_address is on
+      // `seller_payments`, not `profiles`, because profiles is publicly
+      // readable and this is the seller's physical address. Do not move it back.
       supabase
         .from('profiles')
-        .select('handle, display_name, from_address')
+        .select('handle, display_name')
         .eq('id', order.seller_id)
         .single(),
+      supabase
+        .from('seller_payments')
+        .select('from_address')
+        .eq('seller_id', order.seller_id)
+        .maybeSingle(),
       supabase.auth.admin.getUserById(order.seller_id),
     ]);
 
-    if (!drop || !seller?.from_address) {
+    // `seller` needs its own check now that the address lives elsewhere — the
+    // old guard narrowed it only as a side effect of reading from_address off it.
+    if (!drop || !seller || !sellerPayments?.from_address) {
       return { ok: false, label_created: false, error: 'Missing drop or seller address' };
     }
 
@@ -89,7 +99,7 @@ export async function fulfillOrder(
 
     if (order.status === 'paid' && order.shipping_address) {
       try {
-        const bought = await buyLabel(seller.from_address, order.shipping_address, {
+        const bought = await buyLabel(sellerPayments.from_address, order.shipping_address, {
           length_in: drop.dimensions?.length_in ?? 6,
           width_in: drop.dimensions?.width_in ?? 6,
           height_in: drop.dimensions?.height_in ?? 4,
