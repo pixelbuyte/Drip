@@ -79,13 +79,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { data: seller } = await db
-    .from('profiles')
-    .select('id, handle, stripe_account_id, charges_enabled, from_address')
-    .eq('id', product.seller_id)
-    .single();
+  // Public identity and payment config are two different tables.
+  // stripe_account_id, charges_enabled and from_address live on
+  // `seller_payments`, NOT on `profiles`: profiles carries a public read policy
+  // (profiles_public_read_handle, USING (true)), and a Stripe account id — like
+  // from_address, the seller's physical home address — must never sit in a
+  // publicly readable table. Do not move these columns back.
+  const [{ data: seller }, { data: payments }] = await Promise.all([
+    db.from('profiles').select('id, handle').eq('id', product.seller_id).single(),
+    // maybeSingle: a seller who never started Stripe onboarding has no row at
+    // all, which is a null rather than an error.
+    db
+      .from('seller_payments')
+      .select('stripe_account_id, charges_enabled, from_address')
+      .eq('seller_id', product.seller_id)
+      .maybeSingle(),
+  ]);
 
-  if (!seller?.stripe_account_id || !seller.charges_enabled || !seller.from_address) {
+  if (
+    !seller ||
+    !payments?.stripe_account_id ||
+    !payments.charges_enabled ||
+    !payments.from_address
+  ) {
     return NextResponse.json({ error: 'This seller cannot take payments right now' }, { status: 409 });
   }
 
@@ -113,7 +129,7 @@ export async function POST(request: NextRequest) {
       .eq('id', product.products.shipping_profile_id ?? '')
       .maybeSingle();
     shippingCents = await estimateFlatShippingCents(
-      seller.from_address,
+      payments.from_address,
       Number(profile?.weight_oz ?? 8),
       {
         length_in: Number(profile?.length_in ?? 9),
@@ -138,7 +154,7 @@ export async function POST(request: NextRequest) {
         // Destination charge: the seller is paid, Drip's fee is taken off the
         // top. Same fee model as the legacy flow — commission plus the Stripe
         // processing passthrough, so the platform never subsidizes card fees.
-        transfer_data: { destination: seller.stripe_account_id },
+        transfer_data: { destination: payments.stripe_account_id },
         application_fee_amount: applicationFeeAmount(subtotal, total),
         shipping: undefined,
         metadata: {

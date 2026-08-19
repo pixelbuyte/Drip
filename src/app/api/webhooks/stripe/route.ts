@@ -142,8 +142,13 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case 'account.updated': {
         const account = event.data.object as Stripe.Account;
+        // charges_enabled lives on `seller_payments`, not `profiles` — profiles
+        // is publicly readable and Stripe account state must not be. This
+        // handler is the ONLY thing that keeps KYC status in sync, so pointing
+        // it at the wrong table meant charges_enabled never updated at all: a
+        // seller who completed onboarding stayed permanently unable to sell.
         const { error } = await supabase
-          .from('profiles')
+          .from('seller_payments')
           .update({ charges_enabled: account.charges_enabled === true })
           .eq('stripe_account_id', account.id);
 

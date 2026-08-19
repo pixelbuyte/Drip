@@ -55,13 +55,41 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { data: seller } = await supabase
-    .from('profiles')
-    .select('id, handle, display_name, stripe_account_id, charges_enabled, from_address')
-    .eq('id', drop.seller_id)
-    .single();
+  // The seller's public identity and their payment config live in two
+  // different tables: stripe_account_id, charges_enabled and from_address are
+  // on `seller_payments`, NOT on `profiles`. profiles carries a public read
+  // policy (profiles_public_read_handle, USING (true)), and a Stripe account
+  // id — like from_address, the seller's physical home address — must never
+  // sit in a publicly readable table. Do not move these columns back.
+  //
+  // Two queries instead of a PostgREST embed: both are single-row primary-key
+  // lookups and run in parallel, the embed's to-one shape depends on PostgREST
+  // inferring the seller_payments -> profiles FK, and keeping them separate
+  // makes "profile exists but never onboarded" (no seller_payments row at all)
+  // a plain null instead of a nested shape to unwrap.
+  const [{ data: seller }, { data: payments }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, handle, display_name')
+      .eq('id', drop.seller_id)
+      .single(),
+    // maybeSingle: a seller with no seller_payments row has simply never
+    // started Stripe onboarding — that is a null, not an error.
+    supabase
+      .from('seller_payments')
+      .select('stripe_account_id, charges_enabled, from_address')
+      .eq('seller_id', drop.seller_id)
+      .maybeSingle(),
+  ]);
 
-  if (!seller?.stripe_account_id || !seller.charges_enabled || !seller.from_address) {
+  // Missing payment row, half-finished onboarding and a seller who never saved
+  // a ship-from address all mean the same thing to a buyer: no checkout.
+  if (
+    !seller ||
+    !payments?.stripe_account_id ||
+    !payments.charges_enabled ||
+    !payments.from_address
+  ) {
     return NextResponse.json({ error: 'Seller cannot accept payments right now' }, { status: 409 });
   }
 
@@ -88,7 +116,8 @@ export async function POST(request: NextRequest) {
   }
 
   const shippingCents = await estimateFlatShippingCents(
-    seller.from_address,
+    // from_address comes off seller_payments, not the publicly readable profiles row.
+    payments.from_address,
     Number(drop.weight_oz),
     drop.dimensions
   );
@@ -136,7 +165,8 @@ export async function POST(request: NextRequest) {
       ],
       ...(discountCouponId ? { discounts: [{ coupon: discountCouponId }] } : {}),
       payment_intent_data: {
-        transfer_data: { destination: seller.stripe_account_id },
+        // stripe_account_id comes off seller_payments, not the publicly readable profiles row.
+        transfer_data: { destination: payments.stripe_account_id },
         // Drip commission (0 during founding program) + Stripe processing
         // passthrough, so the platform never subsidizes card fees.
         application_fee_amount: applicationFeeAmount(discountedItemCents, discountedTotalCents),

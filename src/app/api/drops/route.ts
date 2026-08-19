@@ -15,18 +15,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, handle, charges_enabled, from_address')
-    .eq('id', user.id)
-    .single();
+  // Public identity and payment config are separate tables: charges_enabled
+  // and from_address are on `seller_payments`, not `profiles`, because profiles
+  // carries a public read policy and neither belongs in a publicly readable
+  // table. Do not move them back.
+  const [{ data: profile }, { data: payments }] = await Promise.all([
+    supabase.from('profiles').select('id, handle').eq('id', user.id).single(),
+    supabase
+      .from('seller_payments')
+      .select('charges_enabled, from_address')
+      .eq('seller_id', user.id)
+      .maybeSingle(),
+  ]);
 
   if (!profile) {
     return NextResponse.json({ error: 'Profile not found' }, { status: 400 });
   }
 
-  // Hard gate: no listings until Stripe onboarding is complete.
-  if (!profile.charges_enabled) {
+  // Hard gate: no listings until Stripe onboarding is complete. A missing
+  // seller_payments row means onboarding never started, which gates the same.
+  if (!payments?.charges_enabled) {
     return NextResponse.json(
       { error: 'Complete Stripe onboarding before creating a drop' },
       { status: 403 }
@@ -34,7 +42,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Shipping labels need a from-address; require it up front.
-  if (!profile.from_address) {
+  if (!payments.from_address) {
     return NextResponse.json(
       { error: 'Add your ship-from address in Settings before creating a drop' },
       { status: 400 }

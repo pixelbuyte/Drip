@@ -35,14 +35,17 @@ export default function SettingsPage() {
         return;
       }
 
-      const { data: profile } = await supabase
-        .from('profiles')
+      // from_address is on `seller_payments`, not `profiles` — profiles is
+      // publicly readable and this is the seller's physical address.
+      // maybeSingle: no row yet just means nothing has been saved.
+      const { data: payments } = await supabase
+        .from('seller_payments')
         .select('from_address')
-        .eq('id', user.id)
-        .single();
+        .eq('seller_id', user.id)
+        .maybeSingle();
 
-      if (profile?.from_address) {
-        const a = profile.from_address;
+      if (payments?.from_address) {
+        const a = payments.from_address;
         setForm({
           name: a.name ?? '',
           street1: a.street1 ?? '',
