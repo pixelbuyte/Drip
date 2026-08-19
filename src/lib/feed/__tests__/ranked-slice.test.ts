@@ -175,6 +175,36 @@ describe('getRankedFeedSlice', () => {
     }
   });
 
+  it('is deterministic: the same fixtures and session id produce the identical slice, every time', async () => {
+    // The whole point of threading rng from sessionId rather than reading
+    // Math.random (candidates.ts, select.ts's own contract): two runs against
+    // identical inputs must be byte-for-byte identical, not just "similar".
+    const videos = [
+      videoRow({ id: 'v1', seller_id: 's1', category_id: 'c1' }),
+      videoRow({ id: 'v2', seller_id: 's2', category_id: 'c2' }),
+      videoRow({ id: 'v3', seller_id: 's3', category_id: 'c1' }),
+      videoRow({ id: 'v4', seller_id: 's4', category_id: 'c2' }),
+      videoRow({ id: 'v5', seller_id: 's5', category_id: 'c1' }),
+    ];
+    const fixtures = () => ({
+      feed_weights: [ACTIVE_WEIGHTS_ROW],
+      category_rate_medians: [],
+      videos,
+      viewer_profiles: [],
+      follows: [],
+      viewer_blocks: [],
+      orders: [],
+      feed_slices: [],
+    });
+
+    const run1 = await getRankedFeedSlice(sourceOf(fixtures()).db, NOW_PARAMS);
+    const run2 = await getRankedFeedSlice(sourceOf(fixtures()).db, NOW_PARAMS);
+
+    expect(run1!.items.map((i) => [i.videoId, i.lane])).toEqual(
+      run2!.items.map((i) => [i.videoId, i.lane])
+    );
+  });
+
   it('never writes feed_slices for the SSR placeholder session id', async () => {
     const { db, upserts } = sourceOf({
       feed_weights: [ACTIVE_WEIGHTS_ROW],
