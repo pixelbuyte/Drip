@@ -278,11 +278,27 @@ function laneOf(lane: CandidateLane): FeedLane {
 }
 
 /**
+ * `feed_weights.variant = 'control'` is NOT the same as "ranking is on".
+ * Migration 00009 seeds `control` with `is_active=true, traffic_share=1.000`
+ * as the spec's baseline weights, already live in production — its own
+ * comment says "read by nothing until FEED_SCORING_ENABLED is on", but no
+ * such flag was ever wired to code. If `getRankedFeedSlice` treated `control`
+ * being active as its go-ahead, merging this file at all would silently
+ * switch 100% of production traffic onto the brand-new ranked pipeline the
+ * moment it deployed — the opposite of the Phase 6 rollout this codebase
+ * documents (ship dark, then raise a non-`control` variant's `traffic_share`
+ * from 0 in small steps). `control` bucketing here just falls through to the
+ * naive feed, exactly as if no row were active at all.
+ */
+const CONTROL_VARIANT = 'control';
+
+/**
  * Returns `null` — never throws for a missing-config reason — when there is
- * no active `feed_weights` row for this viewer's bucket: that is the Phase 6
- * rollout's off switch, and it must read as "use the naive feed", not as an
- * error. Genuine failures (a query error, a bug) DO throw, so the caller
- * (`getFeedSliceRankedOrNaive`) can log them distinctly before falling back.
+ * no active `feed_weights` row for this viewer's bucket (or only `control`
+ * is active): that is the Phase 6 rollout's off switch, and it must read as
+ * "use the naive feed", not as an error. Genuine failures (a query error, a
+ * bug) DO throw, so the caller (`getFeedSliceRankedOrNaive`) can log them
+ * distinctly before falling back.
  */
 export async function getRankedFeedSlice(
   db: SupabaseClient,
@@ -293,7 +309,7 @@ export async function getRankedFeedSlice(
   const offset = params.offset ?? 0;
 
   const active = await loadActiveFeedWeights(db, bucketValue(params.anonId, 'ranked_v2'));
-  if (!active) return null;
+  if (!active || active.variant === CONTROL_VARIANT) return null;
 
   const medians = await loadCategoryMedians(db);
 

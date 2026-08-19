@@ -124,6 +124,19 @@ describe('getRankedFeedSlice', () => {
     expect(result).toEqual({ items: [], exhausted: true, nextBefore: null });
   });
 
+  it('returns null when the only active feed_weights row is "control" (the pre-existing baseline row, not an opt-in)', async () => {
+    // Migration 00009 seeds `control` as is_active=true, traffic_share=1.000
+    // -- already live in production. If getRankedFeedSlice treated that as
+    // "ranking is on", this file landing at all would flip 100% of traffic
+    // onto the brand-new pipeline with no explicit rollout step.
+    const { db } = sourceOf({
+      feed_weights: [{ variant: 'control', is_active: true, traffic_share: 1 }],
+      videos: [videoRow()],
+    });
+    const result = await getRankedFeedSlice(db, NOW_PARAMS);
+    expect(result).toBeNull();
+  });
+
   it('produces a ranked slice with a real lane and writes score/lane to feed_slices', async () => {
     const videos = [
       videoRow({ id: 'v1', seller_id: 's1', category_id: 'c1' }),
