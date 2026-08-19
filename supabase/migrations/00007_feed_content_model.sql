@@ -353,6 +353,21 @@ FROM public.drops d;
 INSERT INTO public.video_products (video_id, product_id, seller_id, position)
 SELECT d.id, d.id, d.seller_id, 0 FROM public.drops d;
 
+-- video_products_max_five is a DEFERRABLE INITIALLY DEFERRED constraint
+-- trigger, so the insert above leaves an after-trigger event queued until
+-- COMMIT, and Postgres refuses ALTER TABLE on a table that has pending trigger
+-- events. Without this the ENABLE ROW LEVEL SECURITY below dies with
+--     cannot ALTER TABLE "video_products" because it has pending trigger events
+-- and both `supabase db push` and apply_migration run a migration inside one
+-- transaction, so that is the production path, not a local artifact. Firing the
+-- deferred check here does not weaken it -- the same count runs, just earlier.
+-- Only reachable when the backfill actually inserted a row, which is why an
+-- empty drops table never surfaced it. Applied statement-at-a-time instead
+-- (psql without --single-transaction) this warns "SET CONSTRAINTS can only be
+-- used in transaction blocks" and is a harmless no-op, because autocommit
+-- leaves nothing pending. Do not delete it to silence that warning.
+SET CONSTRAINTS public.video_products_max_five IMMEDIATE;
+
 -- ---------------------------------------------------------------------------
 -- orders. Buyers still have no accounts; every write is still service-role.
 -- These columns are the minimum needed to delete drops. The checkout agent
@@ -496,11 +511,27 @@ GRANT UPDATE (name, weight_oz, length_in, width_in, height_in, handling_days, is
   ON public.shipping_profiles TO authenticated;
 
 -- products -------------------------------------------------------------------
+-- Intent is unchanged: a product is publicly readable only when its seller can
+-- actually take money. Only the location of that fact changed. charges_enabled
+-- is no longer a column on profiles -- the out-of-band split_seller_pii
+-- migration moved stripe_account_id, charges_enabled and from_address onto
+-- public.seller_payments, because profiles carries profiles_public_read_handle
+-- (USING (true)) and RLS filters rows, not columns: a payout destination and
+-- the seller's physical home address must never sit in a table that every
+-- anonymous storefront request already reads. That split is the design we keep.
+--
+-- Read the flag through public.seller_charges_enabled(uuid) (00012 section 5)
+-- rather than querying seller_payments inline here. A policy expression is
+-- evaluated with the QUERYING role's privileges, and seller_payments is
+-- REVOKE ALL from anon, so an inline EXISTS over it would create fine at
+-- migration time and then fail on the first anonymous page load with
+--     ERROR:  permission denied for table seller_payments
+-- The helper is SECURITY DEFINER; it discloses one boolean about a seller_id
+-- the caller already holds, and no PII column is reachable through it.
 CREATE POLICY products_public_read_sellable ON public.products
   FOR SELECT TO anon USING (
     status <> 'archived'
-    AND EXISTS (SELECT 1 FROM public.profiles pr
-                 WHERE pr.id = products.seller_id AND pr.charges_enabled)
+    AND public.seller_charges_enabled(products.seller_id)
   );
 CREATE POLICY products_owner_all ON public.products
   FOR ALL TO authenticated
