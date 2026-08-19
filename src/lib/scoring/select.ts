@@ -28,6 +28,19 @@ import {
  * Every stochastic step draws from an explicit `Rng` (see ./rng). Nothing here
  * reads a clock or Math.random, so a slice is a pure function of
  * (pool, context, options) and a session replays byte-for-byte.
+ *
+ * SPEC 6.6 adds two OPT-IN dials on top of that, neither of which changes a
+ * default:
+ *
+ *   - `engagedEvents` derives T from how much is known about the viewer
+ *     (`adaptiveTemperature`): 0.12 for a stranger, 0.08 once 200 engaged
+ *     events have accumulated. An explicit `temperature` always overrides it.
+ *   - `randomSlots` reserves N slots for a uniformly random eligible video
+ *     with no scoring at all — the only way a jewelry-only buyer is ever shown
+ *     ceramics.
+ *
+ * Both default to off, so a `select` call written before 6.6 returns exactly
+ * the slice it always did.
  */
 
 // ---------------------------------------------------------------------------
@@ -227,6 +240,143 @@ export function softmaxPick<T extends { score: number }>(
 }
 
 // ---------------------------------------------------------------------------
+// Spec 6.6 — explore vs exploit, made explicit
+// ---------------------------------------------------------------------------
+
+/**
+ * The softmax temperature as a function of how much the platform actually
+ * knows about this viewer.
+ *
+ *   uncertainty = 1 - min(1, engagedEvents / 200)
+ *   T           = base * (1 + 0.5 * uncertainty)
+ *
+ * At the default base of 0.08 that is exactly the spec's dial:
+ *
+ *     0 events -> T = 0.12   a wide, exploratory feed for a stranger
+ *   100 events -> T = 0.10   halfway
+ *   200+ events -> T = 0.08  tight and confident
+ *
+ * This is the mechanism behind "the algorithm got good after a week", and it
+ * costs four lines. Nothing is trained, nothing is fitted, and it needs no
+ * event corpus — only a count the caller already has, which is why it is
+ * buildable today while §6.2's two-tower model (gated at ~500K events) is not.
+ *
+ * The count is a floor, not a cap: 500 engaged events and 200 both mean "we
+ * know this viewer", because uncertainty is clamped at 0. Garbage in — a
+ * negative count, NaN, Infinity — is read as "no evidence at all" and yields
+ * the widest temperature, which is the safe direction to fail: an over-broad
+ * feed loses a little RPM, an over-confident one traps the viewer in whatever
+ * the cold-start model happened to guess first.
+ *
+ * `base` of exactly 0 is preserved as 0, so a caller that has deliberately
+ * chosen greedy argmax (the simulation's 'greedy' strategy) does not get
+ * silently handed a stochastic selector.
+ */
+export function adaptiveTemperature(
+  engagedEvents: number,
+  base: number = SELECTION.SOFTMAX_TEMPERATURE
+): number {
+  const events = Number.isFinite(engagedEvents) && engagedEvents > 0 ? engagedEvents : 0;
+  const b = Number.isFinite(base) && base >= 0 ? base : SELECTION.SOFTMAX_TEMPERATURE;
+  const uncertainty = 1 - Math.min(1, events / SELECTION.UNCERTAINTY_HORIZON_EVENTS);
+  return b * (1 + SELECTION.MAX_EXPLORATION_WIDENING * uncertainty);
+}
+
+/**
+ * Which temperature a `select` call actually runs at.
+ *
+ * An EXPLICIT finite temperature always wins. The offline simulation passes one
+ * on every call (see simulate.ts's StrategyConfig) and must keep reproducing
+ * byte-identically, so the adaptive dial is opt-in via `engagedEvents` and can
+ * never reach in behind a caller that named its own temperature.
+ */
+export function resolveTemperature(o: {
+  temperature?: number;
+  engagedEvents?: number;
+}): number {
+  if (typeof o.temperature === 'number' && Number.isFinite(o.temperature)) return o.temperature;
+  if (typeof o.engagedEvents === 'number') return adaptiveTemperature(o.engagedEvents);
+  return SELECTION.SOFTMAX_TEMPERATURE;
+}
+
+/**
+ * Draw one entry uniformly, consuming exactly one rng value — the deliberate
+ * absence of scoring in the 1-in-20 random slot.
+ *
+ * Same contract as `softmaxPick`: a pool of one has nothing to decide, so it
+ * does not draw. A misbehaving rng is clamped rather than allowed to index off
+ * the end.
+ */
+export function uniformPick<T>(pool: readonly T[], rng: Rng): { pick: T; drew: boolean } {
+  if (pool.length <= 1) return { pick: pool[0], drew: false };
+  const u = rng();
+  const r = Number.isFinite(u) ? Math.min(Math.max(u, 0), 1 - Number.EPSILON) : 0;
+  return { pick: pool[Math.min(pool.length - 1, Math.floor(r * pool.length))], drew: true };
+}
+
+/**
+ * The spec's own rate: one random slot per 20 positions.
+ *
+ * Pass the result to `select` as `randomSlots`. `select` defaults it to 0 — the
+ * 1-in-20 slot is something a caller opts into, so PR #9's simulation numbers
+ * stay reproducible.
+ */
+export function randomSlotsForSlice(sliceSize: number = SELECTION.SLICE_SIZE): number {
+  const size = Math.max(0, Math.floor(numOr(sliceSize, 0)));
+  return Math.floor(size / SELECTION.RANDOM_SLOT_INTERVAL);
+}
+
+/**
+ * Which POSITIONS the random slots occupy. They are reserved up front, exactly
+ * like constraint 4's fresh floor — a slot the scorer is never offered, not a
+ * scored slice with a video swapped in afterwards. The difference matters: a
+ * post-hoc swap discards a video the model chose, so it costs a known-good
+ * impression AND biases whatever it displaces; a reservation costs one slot,
+ * decided before anything competes for it.
+ *
+ * Two positions are off limits:
+ *
+ *   - index 0. Position 1 is the spec's one fixed point — the first video
+ *     decides whether the session continues, so it is never gambled, and a
+ *     random slot is the largest gamble in the module.
+ *   - the last `freshFloor` indexes, where constraint 4's tail reservation
+ *     lives. Exploration must not be paid for out of the fresh lane's floor;
+ *     they are different guarantees serving different people (a random video
+ *     serves the viewer, the fresh floor serves new sellers) and spending one
+ *     on the other quietly deletes a guarantee.
+ *
+ * Within what is left the slots are spread evenly, and the answer is a pure
+ * function of the slice shape — no rng — so which slot is random is fixed while
+ * what lands in it is not. That keeps rng consumption a function of slice shape
+ * alone, which is what makes a session replayable.
+ */
+export function randomSlotPositions(
+  sliceSize: number,
+  randomSlots: number,
+  freshFloor: number = SELECTION.FRESH_FLOOR
+): number[] {
+  const size = Math.max(0, Math.floor(numOr(sliceSize, 0)));
+  const reservedTail = Math.max(0, Math.floor(numOr(freshFloor, 0)));
+  const want = Math.max(0, Math.floor(numOr(randomSlots, 0)));
+
+  const first = 1;
+  const last = size - reservedTail - 1;
+  const usable = last - first + 1;
+  if (want === 0 || usable <= 0) return [];
+
+  const k = Math.min(want, usable);
+  const taken = new Set<number>();
+  for (let j = 1; j <= k; j += 1) {
+    let idx = Math.min(last, Math.max(first, Math.floor((j * size) / (k + 1))));
+    while (taken.has(idx) && idx < last) idx += 1;
+    while (taken.has(idx) && idx > first) idx -= 1;
+    if (taken.has(idx)) continue;
+    taken.add(idx);
+  }
+  return [...taken].sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------------------
 // Impression budget
 // ---------------------------------------------------------------------------
 
@@ -264,8 +414,31 @@ export type SelectOptions = {
   rng: Rng;
   /** Default SELECTION.SLICE_SIZE (20). */
   sliceSize?: number;
-  /** Default SELECTION.SOFTMAX_TEMPERATURE (0.08). 0 degenerates to greedy. */
+  /**
+   * Default SELECTION.SOFTMAX_TEMPERATURE (0.08). 0 degenerates to greedy.
+   * An explicit finite value always wins over `engagedEvents`.
+   */
   temperature?: number;
+  /**
+   * Spec 6.6. How many engaged events this viewer has produced. When
+   * `temperature` is NOT given, this derives one via `adaptiveTemperature`:
+   * 0 events -> 0.12, 100 -> 0.10, 200+ -> 0.08. Omit both and the fixed 0.08
+   * is used, exactly as before — this is an option, not a change of default.
+   */
+  engagedEvents?: number;
+  /**
+   * Spec 6.6. How many slots in this slice go to a uniformly random eligible
+   * video with no scoring at all. `randomSlotsForSlice(sliceSize)` gives the
+   * spec's 1-in-20 rate.
+   *
+   * DEFAULT 0 — off. The random slot changes which videos a slice contains, so
+   * turning it on by default would silently move every number PR #9 reported.
+   * The slots are reserved (see `randomSlotPositions`), never take position 1,
+   * never take a slot constraint 4 has reserved for the fresh lane, and the
+   * video that lands in one still has to satisfy every active hard constraint:
+   * random does not mean broken.
+   */
+  randomSlots?: number;
   /**
    * Video ids still owed guaranteed impressions. They jump the queue into the
    * reserved fresh slots and nowhere else. Defaults to the ids derived from
@@ -336,6 +509,12 @@ function attainableTarget(
  * lowest-scoring entries are tried first, and the whole resulting slice is
  * re-validated so the repair cannot break constraints 1/2/3/6 or trade away a
  * fresh video the floor is counting on.
+ *
+ * A 6.6 random slot is off limits too (`protectedIndexes`). Its occupant was
+ * picked with no scoring, so it is usually the lowest-scoring video in the
+ * slice and would be the first victim every time — the repair would quietly
+ * eat the exploration slot on most slices. The set is empty when
+ * `randomSlots` is 0, so nothing about the old behaviour moves.
  */
 function repairUnseenSeller(
   placed: ScoredCandidate[],
@@ -344,7 +523,8 @@ function repairUnseenSeller(
   seenSellerIds: ReadonlySet<string>,
   active: Active,
   freshFloor: number,
-  freshCeiling: number
+  freshCeiling: number,
+  protectedIndexes: ReadonlySet<number>
 ): void {
   if (placed.length === 0) return;
   if (placed.some((p) => !seenSellerIds.has(p.sellerId))) return;
@@ -360,6 +540,7 @@ function repairUnseenSeller(
   const victims = placed
     .map((p, i) => ({ p, i, s: Number.isFinite(p.score) ? p.score : -Infinity }))
     .slice(1)
+    .filter((v) => !protectedIndexes.has(v.i))
     .sort((a, b) => (a.s === b.s ? a.i - b.i : a.s < b.s ? -1 : 1));
 
   for (const repl of replacements) {
@@ -386,7 +567,9 @@ function repairUnseenSeller(
  *
  * Eligibility is recomputed at EVERY position, because the constraints are
  * order-dependent — what is legal at position 7 depends on positions 1-6 — so
- * there is no static eligible set to sample from once.
+ * there is no static eligible set to sample from once. Spec 6.6's random slots
+ * (opt-in, `randomSlots`) sample from that same eligible set, just uniformly
+ * instead of by score, which is why they cannot break a constraint.
  *
  * Pure: the only inputs are the pool, the context and the options, and the only
  * source of randomness is `opts.rng`. Same pool + same seed => same slice.
@@ -397,7 +580,9 @@ export function select(
   opts: SelectOptions
 ): SelectionResult {
   const sliceSize = Math.max(0, Math.floor(numOr(opts.sliceSize, SELECTION.SLICE_SIZE)));
-  const temperature = numOr(opts.temperature, SELECTION.SOFTMAX_TEMPERATURE);
+  // Explicit temperature wins; `engagedEvents` only fills the gap when none was
+  // named. See resolveTemperature — the simulation harness names one.
+  const temperature = resolveTemperature(opts);
   const freshFloor = Math.max(0, Math.floor(numOr(opts.freshFloor, SELECTION.FRESH_FLOOR)));
   // A ceiling below the floor is a misconfiguration; the floor is the
   // non-negotiable of the two, so it wins.
@@ -411,6 +596,10 @@ export function select(
   if (pool.length === 0 || sliceSize === 0) return { slice: [], relaxed: [], sampled: false };
 
   const owed = opts.budgetOwed ?? budgetOwedIds(pool);
+
+  // Spec 6.6's reserved random slots. Empty (and therefore free) at the default
+  // randomSlots of 0, which is what keeps existing runs byte-identical.
+  const randomAt = new Set(randomSlotPositions(sliceSize, numOr(opts.randomSlots, 0), freshFloor));
 
   const build = (active: Active): { placed: ScoredCandidate[]; drew: boolean } => {
     const placed: ScoredCandidate[] = [];
@@ -463,13 +652,30 @@ export function select(
 
       if (eligible.length === 0) break;
 
-      const { pick, drew: consumed } = softmaxPick(eligible, temperature, rng);
+      // Spec 6.6's exploration slot: no scoring at all, uniform over what is
+      // eligible HERE — so every hard constraint still holds (the violating
+      // candidates were filtered out above, exactly as for a scored pick) and
+      // the video is still never a duplicate. `!reserved` is belt and braces:
+      // randomSlotPositions already keeps these indexes out of the fresh tail.
+      const useRandom = randomAt.has(placed.length) && !reserved;
+      const { pick, drew: consumed } = useRandom
+        ? uniformPick(eligible, rng)
+        : softmaxPick(eligible, temperature, rng);
       if (consumed) drew = true;
       place(pick);
     }
 
     if (active.c7) {
-      repairUnseenSeller(placed, pool, used, ctx.seenSellerIds, active, freshFloor, freshCeiling);
+      repairUnseenSeller(
+        placed,
+        pool,
+        used,
+        ctx.seenSellerIds,
+        active,
+        freshFloor,
+        freshCeiling,
+        randomAt
+      );
     }
 
     return { placed, drew };

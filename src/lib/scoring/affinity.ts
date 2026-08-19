@@ -124,6 +124,12 @@ export type AffinityEvent = {
   count?: number;
 };
 
+/** A resolved weight change for one key of one map. See `applyAffinityDeltas`. */
+export type AffinityDelta = {
+  key: string;
+  delta: number;
+};
+
 /** A seller the viewer said `not_interested` to. Data only — the caller persists it. */
 export type SellerBlock = {
   sellerId: string;
@@ -236,9 +242,7 @@ export function applyEvents(
   current: Readonly<AffinityMap>,
   events: readonly KeyedAffinityEvent[]
 ): AffinityMap {
-  const out: AffinityMap = {};
-  for (const key of Object.keys(current)) out[key] = nonNegative(current[key]);
-
+  const deltas: AffinityDelta[] = [];
   for (const ev of events) {
     if (!ev || !isKey(ev.key)) continue;
     // Cast, not a bare lookup: events cross a process boundary, and an unknown
@@ -247,7 +251,32 @@ export function applyEvents(
     if (weight === undefined || !Number.isFinite(weight)) continue;
     const count = ev.count === undefined ? 1 : ev.count;
     if (!Number.isFinite(count) || count <= 0) continue;
-    out[ev.key] = (out[ev.key] ?? 0) + weight * count;
+    deltas.push({ key: ev.key, delta: weight * count });
+  }
+  return applyAffinityDeltas(current, deltas);
+}
+
+/**
+ * `applyEvents` with the weight already resolved: the spec 6.5 signals below
+ * carry weights that are NOT in `EVENT_WEIGHTS` (see NEGATIVE_SELLER_WEIGHTS),
+ * so they cannot be expressed as a `KeyedAffinityEvent`.
+ *
+ * This is the single implementation of the floor-at-0 rule — `applyEvents`
+ * delegates to it — because that floor is what keeps `normalizeWithCap`'s
+ * water-filling well defined. A map that can hold negative mass has no
+ * normalisation, so stacked negatives bottom out at "no affinity" and the
+ * suppression rows, not the arithmetic, carry the punishment from there.
+ */
+export function applyAffinityDeltas(
+  current: Readonly<AffinityMap>,
+  deltas: readonly AffinityDelta[]
+): AffinityMap {
+  const out: AffinityMap = {};
+  for (const key of Object.keys(current)) out[key] = nonNegative(current[key]);
+
+  for (const d of deltas) {
+    if (!d || !isKey(d.key) || !Number.isFinite(d.delta)) continue;
+    out[d.key] = (out[d.key] ?? 0) + d.delta;
   }
 
   for (const key of Object.keys(out)) {
@@ -476,5 +505,719 @@ export function updateViewerAffinity(
       hashtagAffinity: hashtag.raw,
     },
     sellerBlocks,
+  };
+}
+
+// ===========================================================================
+// SPEC 6.5 — NEGATIVE SIGNALS THAT ACTUALLY BITE
+// ===========================================================================
+//
+// "Most feeds handle negative feedback too gently. Drip should not."
+//
+//   | signal              | effect                                             |
+//   |---------------------|----------------------------------------------------|
+//   | not_interested      | -8 category affinity, seller blocked 30 days, AND   |
+//   |                     | the 20 nearest neighbours by embedding suppressed   |
+//   |                     | for 7 days                                          |
+//   | fast skip (<2s)     | -1.5 category affinity                              |
+//   | 3 consecutive skips | mode=diversify, affinity weight 0 for the session   |
+//   | unfollow            | -5 seller affinity, 30-day For You suppression      |
+//   | refund requested    | -4 seller affinity for that viewer, no re-serve 14d |
+//   | dispute filed       | seller suppressed PLATFORM-WIDE pending review      |
+//
+// WHERE EACH NUMBER LIVES. Read this before adding a weight anywhere.
+//
+//   -8 (not_interested) and -1.5 (fast_skip) are spec 2.7 numbers and already
+//   live in `EVENT_WEIGHTS` above, applied exactly once by
+//   `updateViewerAffinity`. This section deliberately does NOT re-apply them:
+//   two tables holding the same number is how a signal quietly starts biting
+//   twice as hard as the spec says. What 6.5 adds for those two types is the
+//   SUPPRESSION, which 2.7 never modelled.
+//
+//   -5 (unfollow) and -4 (refund_requested) are new here, land on the SELLER
+//   map only, and live in `NEGATIVE_SELLER_WEIGHTS`. That table is typed
+//   `Record<Exclude<NegativeSignalType, AffinityEventType>, number>`, so the
+//   day somebody adds `unfollow` to EVENT_WEIGHTS the compiler rejects it
+//   instead of letting the viewer take -10.
+//
+//   "3 consecutive fast skips -> mode=diversify" is NOT here. It is
+//   within-session state and already lives in ./session.ts
+//   (`DIVERSIFY_SKIP_THRESHOLD`, `sessionMode`, `sessionWeights`), which zeroes
+//   wAffinity for the rest of the session. session.ts imports this module;
+//   importing it back would be a cycle. The row is in the table above only so
+//   the table is the whole of 6.5.
+//
+// THE NEIGHBOUR SUPPRESSION, AND WHY IT IS AN INJECTED PROVIDER.
+//
+// "Blocking a single video when someone tells you they dislike a *kind* of
+// content is theatre — they'll see three more like it in the next minute and
+// conclude the button does nothing."
+//
+// Correct, and not buildable today: the two-tower embedding model of spec 6.2
+// is explicitly gated at ~500K engagement events and the platform has zero. So
+// the nearest-neighbour lookup is a PARAMETER rather than a fake:
+//
+//     type NeighbourProvider = (videoId: string, k: number) => readonly string[]
+//
+// With no provider the suppression degrades to the one video the viewer
+// actually pressed the button on — and SAYS SO. `neighbours.degraded` is true,
+// `neighbours.suppressed` is 0, `neighbours.requested` is 20 and
+// `neighbours.degradedVideoIds` names the videos that collapsed. A suppression
+// covering 1 video instead of 21 is exactly the theatre above, so it is a
+// reported degradation, never a silent one: the caller can alert on it.
+//
+// When 6.2 lands, one injection makes it real —
+//
+//     updateViewerAffinityWithSignals({ ...input, neighbours: annIndex.nearest })
+//
+// — and no other line in this module changes.
+//
+// SUPPRESSIONS ARE DATA, NOT I/O.
+//
+// Every rule here returns `{ scope, id, viewerId, until, surface, reason }`
+// rows for the caller to persist. Nothing does I/O and `now` is always a
+// parameter, so a simulation replays a viewer's entire negative-signal history
+// byte-for-byte.
+//
+// THE SCOPES ARE NOT INTERCHANGEABLE:
+//
+//   viewer_seller    this viewer stops seeing this seller. not_interested
+//                    (30d, every surface), unfollow (30d, For You only),
+//                    refund_requested (14d, For You only).
+//   viewer_video     this viewer stops seeing this video. The not_interested
+//                    video itself plus its 20 nearest neighbours, 7d.
+//   platform_seller  EVERY viewer stops seeing this seller, indefinitely,
+//                    pending human review. Only `dispute_filed` produces one.
+//                    `viewerId` is null and `until` is null, and both are load
+//                    bearing: a viewer-scoped implementation of a filed dispute
+//                    leaves a seller under investigation serving happily to
+//                    everyone except the one person who complained.
+//
+// `surface` separates "blocked" from "suppressed out of For You". A viewer who
+// unfollowed a seller can still open that seller's page; a viewer who pressed
+// not-interested on them cannot, and nobody can reach a disputed seller at all.
+
+// ---------------------------------------------------------------------------
+// Signal vocabulary
+// ---------------------------------------------------------------------------
+
+/**
+ * The rows of spec 6.5, minus the session-mode row that ./session.ts owns.
+ *
+ * `not_interested` and `fast_skip` are deliberately ALSO `AffinityEventType`s:
+ * the same viewer action feeds both passes, contributing its 2.7 weight
+ * through `EVENT_WEIGHTS` and its 6.5 suppressions through here. The two sets
+ * of numbers are disjoint, so nothing is counted twice.
+ */
+export type NegativeSignalType =
+  | 'not_interested'
+  | 'fast_skip'
+  | 'unfollow'
+  | 'refund_requested'
+  | 'dispute_filed';
+
+/** Iterate this rather than re-listing the union. */
+export const NEGATIVE_SIGNAL_TYPES = [
+  'not_interested',
+  'fast_skip',
+  'unfollow',
+  'refund_requested',
+  'dispute_filed',
+] as const satisfies readonly NegativeSignalType[];
+
+const NEGATIVE_SIGNAL_TYPE_SET: ReadonlySet<string> = new Set(NEGATIVE_SIGNAL_TYPES);
+
+export function isNegativeSignalType(value: unknown): value is NegativeSignalType {
+  return typeof value === 'string' && NEGATIVE_SIGNAL_TYPE_SET.has(value);
+}
+
+/**
+ * The 6.5 weights that are NOT already in `EVENT_WEIGHTS`, applied to the
+ * SELLER affinity map.
+ *
+ * `dispute_filed` is 0 on purpose. The spec gives it no affinity weight
+ * because the affinity map is the wrong instrument for it: a filed dispute is
+ * a platform-wide suspension pending review, and expressing that as "this one
+ * viewer likes them 4 less" would be a rounding error dressed up as
+ * enforcement. The suppression IS the mechanism. A 0 weight also emits no
+ * delta at all, so a dispute never conjures a 0-valued key into a viewer's map.
+ */
+export const NEGATIVE_SELLER_WEIGHTS = {
+  unfollow: -5,
+  refund_requested: -4,
+  dispute_filed: 0,
+} as const satisfies Record<Exclude<NegativeSignalType, AffinityEventType>, number>;
+
+// ---------------------------------------------------------------------------
+// Durations
+// ---------------------------------------------------------------------------
+
+/** `not_interested`: "suppress the 20 nearest neighbours by embedding". */
+export const NEIGHBOUR_SUPPRESSION_K = 20;
+
+/** ...for 7 days. */
+export const NEIGHBOUR_SUPPRESSION_DAYS = 7;
+
+/** Unfollow: 30-day For You suppression. */
+export const UNFOLLOW_SUPPRESSION_DAYS = 30;
+
+/** Refund requested: "do not re-serve that seller for 14 days". */
+export const REFUND_SUPPRESSION_DAYS = 14;
+
+// ---------------------------------------------------------------------------
+// Suppressions
+// ---------------------------------------------------------------------------
+
+export type SuppressionScope = 'viewer_seller' | 'viewer_video' | 'platform_seller';
+
+/**
+ * Which surfaces a row covers. `all` hides the subject everywhere; `for_you`
+ * hides it from the ranked feed only, leaving direct navigation intact.
+ */
+export type SuppressionSurface = 'all' | 'for_you';
+
+/**
+ * One suppression, as the caller will persist it.
+ *
+ * `viewerId` is null exactly when `scope` is `platform_seller` — that null is
+ * what makes the row apply to everybody. `until` is null only for a dispute:
+ * "pending review" has no expiry, and inventing one would quietly reinstate a
+ * seller nobody ever cleared.
+ */
+export type Suppression = {
+  scope: SuppressionScope;
+  /** sellerId for the seller scopes, videoId for `viewer_video`. */
+  id: string;
+  /** Null means every viewer. */
+  viewerId: string | null;
+  /** Null means indefinite, pending review. */
+  until: Date | null;
+  surface: SuppressionSurface;
+  /** The 6.5 signal that produced this row. Part of its identity — see `mergeSuppressions`. */
+  reason: NegativeSignalType;
+};
+
+type SuppressionRule = {
+  scope: SuppressionScope;
+  /** Null = indefinite. */
+  days: number | null;
+  surface: SuppressionSurface;
+};
+
+/**
+ * Every suppression the spec asks for, in one greppable table. The keys name
+ * the rule rather than the signal because `not_interested` produces two
+ * different rows with two different lifetimes.
+ */
+export const SUPPRESSION_RULES = {
+  /** "seller blocked 30 days" — a block, so every surface. */
+  not_interested_seller: { scope: 'viewer_seller', days: SELLER_BLOCK_DAYS, surface: 'all' },
+  /** The disliked video and its 20 nearest neighbours, 7 days. */
+  not_interested_video: {
+    scope: 'viewer_video',
+    days: NEIGHBOUR_SUPPRESSION_DAYS,
+    surface: 'all',
+  },
+  /** "30-day For You suppression" — the feed only; the seller's page still works. */
+  unfollow: { scope: 'viewer_seller', days: UNFOLLOW_SUPPRESSION_DAYS, surface: 'for_you' },
+  /** "do not re-serve that seller for 14 days" — re-serving is what the feed does. */
+  refund_requested: { scope: 'viewer_seller', days: REFUND_SUPPRESSION_DAYS, surface: 'for_you' },
+  /** Platform-wide, indefinite, pending review. */
+  dispute_filed: { scope: 'platform_seller', days: null, surface: 'all' },
+} as const satisfies Record<string, SuppressionRule>;
+
+function suppressionUntil(now: Date, days: number | null): Date | null {
+  return days === null ? null : new Date(now.getTime() + days * MS_PER_DAY);
+}
+
+function suppressionRow(
+  rule: SuppressionRule,
+  id: string,
+  viewerId: string | null,
+  now: Date,
+  reason: NegativeSignalType
+): Suppression {
+  return {
+    scope: rule.scope,
+    id,
+    viewerId,
+    until: suppressionUntil(now, rule.days),
+    surface: rule.surface,
+    reason,
+  };
+}
+
+/** Bridges the 2.7 `SellerBlock` shape onto a 6.5 row. Same fact, one representation. */
+export function suppressionFromSellerBlock(block: SellerBlock, viewerId: string): Suppression {
+  return {
+    scope: 'viewer_seller',
+    id: block.sellerId,
+    viewerId,
+    until: block.blockedUntil,
+    surface: SUPPRESSION_RULES.not_interested_seller.surface,
+    reason: 'not_interested',
+  };
+}
+
+/** Live until the expiry instant, exclusive — the same boundary as `isSellerBlocked`. */
+export function isSuppressionActive(row: Suppression, now: Date): boolean {
+  return row.until === null || row.until.getTime() > now.getTime();
+}
+
+export function activeSuppressions(rows: readonly Suppression[], now: Date): Suppression[] {
+  return rows.filter((row) => isSuppressionActive(row, now));
+}
+
+/**
+ * Collapse rows that say the same thing, keeping the longest-lived.
+ *
+ * Identity includes `reason`, which looks redundant until a refollow: an
+ * unfollow (30d, For You) and a refund (14d, For You) against one seller are
+ * the same scope, id, viewer and surface, and merging them would leave a
+ * single row labelled `unfollow` that the viewer could then delete by pressing
+ * follow — silently lifting the refund suppression too. Keeping them apart
+ * costs one row and closes that hole.
+ */
+export function mergeSuppressions(rows: readonly Suppression[]): Suppression[] {
+  const byKey = new Map<string, Suppression>();
+  for (const row of rows) {
+    if (!row || !isKey(row.id)) continue;
+    const key = [row.scope, row.id, row.viewerId ?? '', row.surface, row.reason].join(' ');
+    const previous = byKey.get(key);
+    if (previous === undefined) {
+      byKey.set(key, row);
+      continue;
+    }
+    if (previous.until === null) continue;
+    if (row.until === null || row.until.getTime() > previous.until.getTime()) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values()];
+}
+
+/** What the feed asks before serving a candidate. */
+export type SuppressionQuery = {
+  viewerId: string;
+  sellerId?: string | null;
+  videoId?: string | null;
+  now: Date;
+  /** Defaults to `for_you`, because the feed is the caller that matters. */
+  surface?: SuppressionSurface;
+};
+
+function matchesQuery(row: Suppression, query: SuppressionQuery): boolean {
+  const surface = query.surface ?? 'for_you';
+  if (row.surface !== 'all' && row.surface !== surface) return false;
+  switch (row.scope) {
+    case 'platform_seller':
+      // No viewer check: that is the entire point of the scope.
+      return isKey(query.sellerId) && row.id === query.sellerId;
+    case 'viewer_seller':
+      return row.viewerId === query.viewerId && isKey(query.sellerId) && row.id === query.sellerId;
+    case 'viewer_video':
+      return row.viewerId === query.viewerId && isKey(query.videoId) && row.id === query.videoId;
+    default:
+      return false;
+  }
+}
+
+/** The first live row that hides this candidate from this viewer, or null. */
+export function findSuppression(
+  rows: readonly Suppression[],
+  query: SuppressionQuery
+): Suppression | null {
+  for (const row of rows) {
+    if (!row) continue;
+    if (!isSuppressionActive(row, query.now)) continue;
+    if (matchesQuery(row, query)) return row;
+  }
+  return null;
+}
+
+export function isSuppressed(rows: readonly Suppression[], query: SuppressionQuery): boolean {
+  return findSuppression(rows, query) !== null;
+}
+
+// ---------------------------------------------------------------------------
+// Revocation — unfollow is not a life sentence
+// ---------------------------------------------------------------------------
+
+/**
+ * "Delete the rows this viewer's action undoes." Data, like everything else.
+ *
+ * `reason` is required and never widened to "all reasons": a follow undoes an
+ * unfollow, nothing more. It cannot lift a not_interested block, a refund
+ * suppression, or — see `revokeSuppressions` — anything platform-wide.
+ */
+export type SuppressionRevocation = {
+  scope: SuppressionScope;
+  id: string;
+  viewerId: string;
+  reason: NegativeSignalType;
+};
+
+/** The revocation a `follow` earns: it clears that viewer's unfollow suppression only. */
+export function revocationForRefollow(sellerId: string, viewerId: string): SuppressionRevocation {
+  return { scope: 'viewer_seller', id: sellerId, viewerId, reason: 'unfollow' };
+}
+
+/**
+ * Apply revocations to a persisted row set.
+ *
+ * Platform-scoped rows are dropped from consideration before anything else. A
+ * viewer pressing follow on a seller who is under dispute review must not be
+ * able to reinstate them for the entire platform, and relying on the key
+ * comparison to happen to miss is not a safeguard.
+ */
+export function revokeSuppressions(
+  rows: readonly Suppression[],
+  revocations: readonly SuppressionRevocation[]
+): Suppression[] {
+  if (revocations.length === 0) return [...rows];
+  const keys = new Set<string>();
+  for (const r of revocations) {
+    if (!r || !isKey(r.id) || !isKey(r.viewerId)) continue;
+    if (r.scope === 'platform_seller') continue;
+    keys.add([r.scope, r.id, r.viewerId, r.reason].join(' '));
+  }
+  return rows.filter((row) => {
+    if (!row) return false;
+    if (row.scope === 'platform_seller' || row.viewerId === null) return true;
+    return !keys.has([row.scope, row.id, row.viewerId, row.reason].join(' '));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Neighbours (spec 6.2, injected)
+// ---------------------------------------------------------------------------
+
+/**
+ * The nearest-neighbour lookup spec 6.5 needs and spec 6.2 has not built yet.
+ * Returns up to `k` video ids nearest `videoId` in embedding space. Must be
+ * pure and deterministic for a given index; the simulation replays it.
+ */
+export type NeighbourProvider = (videoId: string, k: number) => readonly string[];
+
+/**
+ * The honest stand-in until 6.2 exists: no embeddings, therefore no
+ * neighbours. Passing it is treated exactly like passing nothing —
+ * `providerPresent` is false — so "we have no model" and "we forgot to wire
+ * the model" never look the same in a log.
+ */
+export const NO_NEIGHBOURS: NeighbourProvider = () => [];
+
+/** What actually happened to the neighbour half of `not_interested`. */
+export type NeighbourSuppressionReport = {
+  /** False when no provider was supplied, or `NO_NEIGHBOURS` was. */
+  providerPresent: boolean;
+  /** k per `not_interested` carrying a videoId — what the spec asked for. */
+  requested: number;
+  /** Distinct neighbour videos actually suppressed — what the viewer got. */
+  suppressed: number;
+  /** True when at least one `not_interested` collapsed to its single video. */
+  degraded: boolean;
+  /** Which videos those were, so the caller can alert with a subject. */
+  degradedVideoIds: string[];
+};
+
+function resolveK(k: number | undefined): number {
+  if (k === undefined) return NEIGHBOUR_SUPPRESSION_K;
+  if (!Number.isFinite(k) || k <= 0) return NEIGHBOUR_SUPPRESSION_K;
+  return Math.floor(k);
+}
+
+// ---------------------------------------------------------------------------
+// The 6.5 pass
+// ---------------------------------------------------------------------------
+
+/**
+ * One negative signal. Discrete acts, so there is no `count`: a viewer cannot
+ * unfollow twice. Two genuinely separate occurrences in one batch (two refunds
+ * against one seller) are distinguished by `id`; without one, identical
+ * signals collapse to a single application, which is what makes "each weight
+ * applied exactly once" true by construction rather than by hope.
+ */
+export type NegativeSignalEvent = {
+  type: NegativeSignalType;
+  /** Required for the neighbour suppression — `not_interested` is about a video. */
+  videoId?: string | null;
+  sellerId?: string | null;
+  categoryId?: string | null;
+  /** Event / order / dispute id, when two occurrences must both count. */
+  id?: string | null;
+};
+
+export type NegativeSignalInput = {
+  viewerId: string;
+  signals: readonly NegativeSignalEvent[];
+  now: Date;
+  /** Omit (or pass NO_NEIGHBOURS) until spec 6.2 exists. */
+  neighbours?: NeighbourProvider;
+  /** Defaults to NEIGHBOUR_SUPPRESSION_K. Non-positive or non-finite falls back to it. */
+  neighbourK?: number;
+};
+
+export type NegativeSignalResult = {
+  /** Weight changes for the SELLER map, from NEGATIVE_SELLER_WEIGHTS only. */
+  sellerDeltas: AffinityDelta[];
+  suppressions: Suppression[];
+  neighbours: NeighbourSuppressionReport;
+};
+
+/**
+ * Signals in, deltas and suppression rows out. Pure; no clock, no I/O, no
+ * randomness.
+ *
+ * Note what is NOT here: the -8 and -1.5 category weights. They belong to
+ * `EVENT_WEIGHTS` and are applied by `updateViewerAffinity`. Callers that want
+ * both halves of 6.5 in one call should use `updateViewerAffinityWithSignals`,
+ * which runs both passes over one event stream and cannot double-count.
+ */
+export function applyNegativeSignals(input: NegativeSignalInput): NegativeSignalResult {
+  const { viewerId, now } = input;
+  const signals = input.signals ?? [];
+  const k = resolveK(input.neighbourK);
+  const provider = input.neighbours;
+  const providerPresent = provider !== undefined && provider !== NO_NEIGHBOURS;
+
+  const sellerDeltas: AffinityDelta[] = [];
+  const suppressions: Suppression[] = [];
+  const degradedVideoIds: string[] = [];
+  let requested = 0;
+  let suppressed = 0;
+
+  const seen = new Set<string>();
+
+  for (const signal of signals) {
+    if (!signal || !isNegativeSignalType(signal.type)) continue;
+    const dedupeKey = [
+      signal.type,
+      signal.id ?? '',
+      signal.videoId ?? '',
+      signal.sellerId ?? '',
+    ].join(' ');
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    switch (signal.type) {
+      case 'fast_skip':
+        // -1.5 is EVENT_WEIGHTS' and the three-in-a-row rule is session.ts's.
+        // A fast skip suppresses nothing on its own: it is the weakest signal
+        // in the table and the viewer may simply have been scrolling.
+        break;
+
+      case 'not_interested': {
+        if (isKey(signal.sellerId)) {
+          suppressions.push(
+            suppressionRow(
+              SUPPRESSION_RULES.not_interested_seller,
+              signal.sellerId,
+              viewerId,
+              now,
+              'not_interested'
+            )
+          );
+        }
+        if (!isKey(signal.videoId)) break;
+
+        suppressions.push(
+          suppressionRow(
+            SUPPRESSION_RULES.not_interested_video,
+            signal.videoId,
+            viewerId,
+            now,
+            'not_interested'
+          )
+        );
+
+        requested += k;
+        const found = provider ? provider(signal.videoId, k) : [];
+        const taken = new Set<string>();
+        for (const neighbour of found ?? []) {
+          if (taken.size >= k) break;
+          // The source video already has its own row, and a provider that
+          // returns it must not eat one of the 20 slots.
+          if (!isKey(neighbour) || neighbour === signal.videoId || taken.has(neighbour)) continue;
+          taken.add(neighbour);
+          suppressions.push(
+            suppressionRow(
+              SUPPRESSION_RULES.not_interested_video,
+              neighbour,
+              viewerId,
+              now,
+              'not_interested'
+            )
+          );
+        }
+        suppressed += taken.size;
+        if (taken.size === 0) degradedVideoIds.push(signal.videoId);
+        break;
+      }
+
+      case 'unfollow':
+      case 'refund_requested':
+      case 'dispute_filed': {
+        if (!isKey(signal.sellerId)) break;
+        const weight = NEGATIVE_SELLER_WEIGHTS[signal.type];
+        if (weight !== 0) sellerDeltas.push({ key: signal.sellerId, delta: weight });
+        suppressions.push(
+          suppressionRow(
+            SUPPRESSION_RULES[signal.type],
+            signal.sellerId,
+            // The null is the platform-wide part. Do not "fix" it to viewerId.
+            signal.type === 'dispute_filed' ? null : viewerId,
+            now,
+            signal.type
+          )
+        );
+        break;
+      }
+    }
+  }
+
+  return {
+    sellerDeltas,
+    suppressions: mergeSuppressions(suppressions),
+    neighbours: {
+      providerPresent,
+      requested,
+      suppressed,
+      degraded: degradedVideoIds.length > 0,
+      degradedVideoIds,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// One pass over one stream
+// ---------------------------------------------------------------------------
+
+/**
+ * A 2.7 event or a 6.5 signal. One stream, so a `not_interested` cannot be fed
+ * to both passes twice by a caller trying to be helpful.
+ */
+export type ViewerEvent = Omit<AffinityEvent, 'type'> & {
+  type: AffinityEventType | NegativeSignalType;
+  /** Needed by the neighbour suppression; ignored by the 2.7 pass. */
+  videoId?: string | null;
+  /** Distinguishes repeated 6.5 signals; ignored by the 2.7 pass. */
+  id?: string | null;
+};
+
+export type ViewerSignalUpdate = ViewerAffinityUpdate & {
+  /** Persist these. `sellerBlocks` is the same 30-day fact in the older shape. */
+  suppressions: Suppression[];
+  /** Rows the caller should DELETE from storage — a refollow undoing an unfollow. */
+  revocations: SuppressionRevocation[];
+  neighbours: NeighbourSuppressionReport;
+};
+
+export type ViewerSignalInput = {
+  profile: ViewerProfile;
+  viewerId: string;
+  events: readonly ViewerEvent[];
+  daysElapsed: number;
+  now: Date;
+  cap?: number;
+  neighbours?: NeighbourProvider;
+  neighbourK?: number;
+};
+
+function isAffinityEventType(value: string): value is AffinityEventType {
+  return Object.prototype.hasOwnProperty.call(EVENT_WEIGHTS, value);
+}
+
+/**
+ * The whole thing: spec 2.7's decay/accumulate/normalise pass and spec 6.5's
+ * negative signals, over ONE event stream.
+ *
+ * Each weight is applied exactly once because the two tables are disjoint by
+ * construction — `EVENT_WEIGHTS` owns not_interested/fast_skip and
+ * `NEGATIVE_SELLER_WEIGHTS` owns unfollow/refund/dispute, with the type system
+ * enforcing that no type appears in both. An event whose type only 6.5 knows
+ * passes through `updateViewerAffinity` untouched (it ignores unknown types),
+ * and its seller weight is applied to the RAW map afterwards, before
+ * normalisation — which is the same thing, since `normalizeWithCap` is a pure
+ * function of the raw map.
+ *
+ * REFOLLOW. An unfollow still costs -5 seller affinity even if the viewer
+ * follows again a second later: the affinity map records what they did, and it
+ * decays on its own. The 30-day suppression does not survive, because a viewer
+ * who has just chosen to follow a seller is plainly willing to see them. A
+ * follow LATER IN THE STREAM than the unfollow both cancels that batch's
+ * suppression and returns a revocation, so a persisted row from an earlier
+ * batch goes too. A follow EARLIER in the stream does neither — they followed,
+ * then changed their mind, and the suppression stands.
+ */
+export function updateViewerAffinityWithSignals(input: ViewerSignalInput): ViewerSignalUpdate {
+  const { profile, viewerId, daysElapsed, now } = input;
+  const events = input.events ?? [];
+  const cap = input.cap ?? AFFINITY_CAP;
+
+  const affinityEvents: AffinityEvent[] = [];
+  const signals: NegativeSignalEvent[] = [];
+  const lastFollow = new Map<string, number>();
+  const lastUnfollow = new Map<string, number>();
+
+  for (let i = 0; i < events.length; i++) {
+    const ev = events[i];
+    if (!ev || typeof ev.type !== 'string') continue;
+
+    if (isAffinityEventType(ev.type)) {
+      affinityEvents.push({
+        type: ev.type,
+        categoryId: ev.categoryId,
+        sellerId: ev.sellerId,
+        hashtags: ev.hashtags,
+        count: ev.count,
+      });
+      if (ev.type === 'follow' && isKey(ev.sellerId)) lastFollow.set(ev.sellerId, i);
+    }
+
+    if (isNegativeSignalType(ev.type)) {
+      signals.push({
+        type: ev.type,
+        videoId: ev.videoId,
+        sellerId: ev.sellerId,
+        categoryId: ev.categoryId,
+        id: ev.id,
+      });
+      if (ev.type === 'unfollow' && isKey(ev.sellerId)) lastUnfollow.set(ev.sellerId, i);
+    }
+  }
+
+  const base = updateViewerAffinity(profile, affinityEvents, daysElapsed, now, cap);
+  const negative = applyNegativeSignals({
+    viewerId,
+    signals,
+    now,
+    neighbours: input.neighbours,
+    neighbourK: input.neighbourK,
+  });
+
+  const revocations: SuppressionRevocation[] = [];
+  for (const [sellerId, followIndex] of lastFollow) {
+    const unfollowIndex = lastUnfollow.get(sellerId);
+    // They unfollowed after following: the suppression is the newer fact.
+    if (unfollowIndex !== undefined && unfollowIndex > followIndex) continue;
+    revocations.push(revocationForRefollow(sellerId, viewerId));
+  }
+
+  const sellerRaw = applyAffinityDeltas(base.raw.sellerAffinity, negative.sellerDeltas);
+
+  return {
+    profile: {
+      ...base.profile,
+      sellerAffinity: normalizeWithCap(sellerRaw, cap),
+    },
+    raw: {
+      ...base.raw,
+      sellerAffinity: sellerRaw,
+    },
+    sellerBlocks: base.sellerBlocks,
+    suppressions: revokeSuppressions(negative.suppressions, revocations),
+    revocations,
+    neighbours: negative.neighbours,
   };
 }

@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32, type Rng } from '../rng';
 import {
   RELAX_ORDER,
+  adaptiveTemperature,
   budgetOwedIds,
   isBudgetOwed,
+  randomSlotPositions,
+  randomSlotsForSlice,
+  resolveTemperature,
   sampleIndex,
   select,
   softmaxPick,
   softmaxWeights,
+  uniformPick,
   type SelectOptions,
 } from '../select';
 import {
@@ -714,5 +719,553 @@ describe('select — relaxation', () => {
       expect(relaxed).toEqual(RELAX_ORDER.slice(0, relaxed.length));
       assertConstraints(slice, relaxed);
     }
+  });
+});
+
+// ===========================================================================
+// SPEC 6.6 — explore vs exploit, made explicit.
+//
+// Two dials, both OPT-IN: an adaptive temperature derived from how much the
+// platform knows about the viewer, and a reserved slot that is filled with no
+// scoring at all. Neither may move a number that PR #9 already reported, so
+// every suite below is paired with a proof that the default path is untouched.
+// ===========================================================================
+
+describe('adaptiveTemperature — the spec’s own numbers', () => {
+  // T = 0.08 * (1 + 0.5 * uncertainty), uncertainty = 1 - min(1, events / 200).
+  // These three are quoted verbatim in the spec, so they are asserted exactly
+  // rather than approximately — the arithmetic happens to be exact in binary
+  // floating point and a drift of even 1 ulp would mean the formula changed.
+  it('gives a brand-new viewer T = 0.12 — a wide, exploratory feed', () => {
+    expect(adaptiveTemperature(0)).toBe(0.12);
+  });
+
+  it('gives a viewer with 200+ engagements T = 0.08 — tight and confident', () => {
+    expect(adaptiveTemperature(200)).toBe(SELECTION.SOFTMAX_TEMPERATURE);
+    expect(adaptiveTemperature(500)).toBe(0.08);
+    expect(adaptiveTemperature(1_000_000)).toBe(0.08);
+  });
+
+  it('sits halfway at 100 engagements: T = 0.10', () => {
+    expect(adaptiveTemperature(100)).toBe(0.1);
+  });
+
+  it('narrows monotonically as evidence accumulates', () => {
+    let prev = Infinity;
+    for (let e = 0; e <= 400; e += 10) {
+      const t = adaptiveTemperature(e);
+      expect(t).toBeLessThanOrEqual(prev);
+      expect(t).toBeGreaterThanOrEqual(SELECTION.SOFTMAX_TEMPERATURE);
+      expect(t).toBeLessThanOrEqual(0.12);
+      prev = t;
+    }
+    // The dial has exactly the range the spec claims, and no more.
+    expect(adaptiveTemperature(0) / adaptiveTemperature(200)).toBeCloseTo(1.5, 10);
+  });
+
+  it('reads a negative or non-finite count as "no evidence at all"', () => {
+    // Failing wide is the safe direction: an over-broad feed costs a little
+    // RPM, an over-confident one traps the viewer in a cold-start guess.
+    for (const bad of [-1, -1e9, Number.NaN, Infinity, -Infinity]) {
+      expect(adaptiveTemperature(bad)).toBe(0.12);
+    }
+  });
+
+  it('scales off whatever base it is handed', () => {
+    expect(adaptiveTemperature(0, 0.2)).toBeCloseTo(0.3, 12);
+    expect(adaptiveTemperature(200, 0.2)).toBe(0.2);
+    expect(adaptiveTemperature(100, 0.2)).toBeCloseTo(0.25, 12);
+  });
+
+  it('leaves a deliberate base of 0 greedy instead of quietly making it stochastic', () => {
+    // simulate.ts's 'greedy' strategy is temperature 0. Widening that by 50%
+    // would still be 0, but only by accident — assert it on purpose.
+    expect(adaptiveTemperature(0, 0)).toBe(0);
+    expect(adaptiveTemperature(500, 0)).toBe(0);
+  });
+
+  it('falls back to the module default for a nonsense base', () => {
+    for (const bad of [Number.NaN, -0.5, Infinity]) {
+      expect(adaptiveTemperature(200, bad)).toBe(SELECTION.SOFTMAX_TEMPERATURE);
+    }
+  });
+});
+
+describe('resolveTemperature — an explicit temperature always wins', () => {
+  it('uses the fixed 0.08 when neither dial is set', () => {
+    expect(resolveTemperature({})).toBe(SELECTION.SOFTMAX_TEMPERATURE);
+  });
+
+  it('derives from engagedEvents only when no temperature was named', () => {
+    expect(resolveTemperature({ engagedEvents: 0 })).toBe(0.12);
+    expect(resolveTemperature({ engagedEvents: 100 })).toBe(0.1);
+    expect(resolveTemperature({ engagedEvents: 200 })).toBe(0.08);
+  });
+
+  it('lets an explicit temperature override the derived one, including 0', () => {
+    // The simulation harness passes a temperature on every call and must keep
+    // reproducing byte-identically, so the dial can never reach in behind it.
+    expect(resolveTemperature({ temperature: 0.05, engagedEvents: 0 })).toBe(0.05);
+    expect(resolveTemperature({ temperature: 0, engagedEvents: 0 })).toBe(0);
+  });
+
+  it('treats a non-finite explicit temperature as absent, exactly as before', () => {
+    expect(resolveTemperature({ temperature: Number.NaN })).toBe(SELECTION.SOFTMAX_TEMPERATURE);
+    expect(resolveTemperature({ temperature: Number.NaN, engagedEvents: 0 })).toBe(0.12);
+  });
+});
+
+describe('the dial actually turns — higher T flattens the sampling distribution', () => {
+  const runs = 2000;
+  // Five candidates, evenly spaced 0.1 apart. Closed form for the top's share:
+  //   T = 0.08 -> 0.715      T = 0.12 -> 0.574
+  const field = [0.9, 0.8, 0.7, 0.6, 0.5].map((score, i) => ({ score, id: `f${i}` }));
+
+  function topWinRate(temperature: number, seed = 20_260_819): number {
+    const rng = mulberry32(seed);
+    let top = 0;
+    for (let i = 0; i < runs; i += 1) {
+      if (softmaxPick(field, temperature, rng).pick.id === 'f0') top += 1;
+    }
+    return top / runs;
+  }
+
+  it('drops the top candidate’s win rate when the viewer is a stranger', () => {
+    const confident = topWinRate(adaptiveTemperature(500)); // T = 0.08
+    const exploratory = topWinRate(adaptiveTemperature(0)); // T = 0.12
+
+    // Each matches its closed form, so this measures the softmax and not the seed.
+    expect(confident).toBeCloseTo(0.715, 1);
+    expect(exploratory).toBeCloseTo(0.574, 1);
+
+    // The headline: the same pool, the same seed, a measurably wider feed.
+    // Measured over 2,000 draws: 0.7145 at T = 0.08 -> 0.5665 at T = 0.12, a
+    // drop of 14.8 points in the top candidate's share.
+    expect(exploratory).toBeLessThan(confident - 0.08);
+  });
+
+  it('flattens without inverting — the best video still wins most often', () => {
+    const exploratory = topWinRate(adaptiveTemperature(0));
+    expect(exploratory).toBeGreaterThan(0.5); // still the plurality by far
+    expect(exploratory).toBeLessThan(0.7); // but no longer a near-lock
+  });
+
+  it('shows the same widening end to end, in a whole slice', () => {
+    // One runaway leader (position 1, deterministic), one runner-up, and a
+    // field of 20 also-rans. How often the runner-up takes position 2 is a
+    // direct readout of the temperature.
+    const lead = sc({ videoId: 'lead', sellerId: 'ld', categoryId: 'ldc', score: 1, minPriceCents: 1500 });
+    const runner = sc({ videoId: 'runner', sellerId: 'rn', categoryId: 'rnc', score: 0.9, minPriceCents: 4000 });
+    const alsoRans = Array.from({ length: 20 }, (_, i) =>
+      sc({
+        videoId: `ar${String(i).padStart(2, '0')}`, sellerId: `ars${i}`, categoryId: `arc${i % 5}`,
+        score: 0.7, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const p = [lead, runner, ...alsoRans];
+
+    const rateOfRunnerUp = (engagedEvents: number): number => {
+      let hits = 0;
+      const seeds = 600;
+      for (let seed = 0; seed < seeds; seed += 1) {
+        const { slice } = select(p, ctx(), opts({ seed, engagedEvents, sliceSize: 3, freshFloor: 0 }));
+        if (slice[1].videoId === 'runner') hits += 1;
+      }
+      return hits / seeds;
+    };
+
+    const seasoned = rateOfRunnerUp(500); // T = 0.08, closed form 0.379
+    const stranger = rateOfRunnerUp(0); //  T = 0.12, closed form 0.209
+    // Measured over 600 seeds: 0.3817 for a seasoned viewer -> 0.2050 for a
+    // stranger. The dial reaches all the way through select(), not just
+    // through softmaxPick().
+    expect(seasoned).toBeCloseTo(0.379, 1);
+    expect(stranger).toBeCloseTo(0.209, 1);
+    expect(stranger).toBeLessThan(seasoned - 0.08);
+  });
+});
+
+describe('select — the adaptive temperature is an option, not a new default', () => {
+  const p = pool(60);
+
+  it('is identical to passing the derived temperature by hand', () => {
+    for (let seed = 0; seed < 15; seed += 1) {
+      const derived = select(p, ctx(), opts({ seed, engagedEvents: 0 }));
+      const byHand = select(p, ctx(), opts({ seed, temperature: 0.12 }));
+      expect(ids(derived.slice)).toEqual(ids(byHand.slice));
+    }
+  });
+
+  it('leaves an explicit temperature in charge when both are given', () => {
+    for (let seed = 0; seed < 15; seed += 1) {
+      const both = select(p, ctx(), opts({ seed, temperature: 0, engagedEvents: 0 }));
+      const only = select(p, ctx(), opts({ seed, temperature: 0 }));
+      expect(ids(both.slice)).toEqual(ids(only.slice));
+      expect(both.sampled).toBe(false); // temperature 0 still consumes no rng
+    }
+  });
+
+  it('is deterministic under a fixed seed, dial or no dial', () => {
+    const a = select(p, ctx(), opts({ seed: 4242, engagedEvents: 0, randomSlots: 1 }));
+    const b = select(p, ctx(), opts({ seed: 4242, engagedEvents: 0, randomSlots: 1 }));
+    expect(ids(a.slice)).toEqual(ids(b.slice));
+    expect(a.relaxed).toEqual(b.relaxed);
+    expect(a.sampled).toBe(b.sampled);
+  });
+
+  it('still holds every hard constraint at the widest temperature', () => {
+    for (let seed = 0; seed < 30; seed += 1) {
+      const { slice, relaxed } = select(p, ctx(), opts({ seed, engagedEvents: 0 }));
+      assertConstraints(slice, relaxed);
+      expect(slice.length).toBe(20);
+    }
+  });
+});
+
+describe('randomSlotPositions / randomSlotsForSlice — 1 slot in every 20', () => {
+  it('reads the spec’s rate straight off the slice size', () => {
+    expect(randomSlotsForSlice(SELECTION.SLICE_SIZE)).toBe(1);
+    expect(randomSlotsForSlice(20)).toBe(1);
+    expect(randomSlotsForSlice(40)).toBe(2);
+    expect(randomSlotsForSlice(19)).toBe(0); // a short slice buys no slot
+    expect(randomSlotsForSlice(0)).toBe(0);
+  });
+
+  it('reserves exactly one position in a 20-slice, in the body', () => {
+    expect(randomSlotPositions(20, 1)).toEqual([10]);
+  });
+
+  it('never reserves position 1 — the first video is never gambled', () => {
+    for (let k = 0; k <= 20; k += 1) {
+      expect(randomSlotPositions(20, k)).not.toContain(0);
+    }
+  });
+
+  it('never reserves a slot constraint 4 has reserved for the fresh lane', () => {
+    for (let k = 1; k <= 20; k += 1) {
+      for (const floor of [0, 1, 3, 6]) {
+        const pos = randomSlotPositions(20, k, floor);
+        expect(new Set(pos).size).toBe(pos.length); // distinct
+        for (const i of pos) {
+          expect(i).toBeGreaterThanOrEqual(1);
+          expect(i).toBeLessThan(20 - floor);
+        }
+      }
+    }
+  });
+
+  it('spreads several slots evenly rather than clumping them', () => {
+    expect(randomSlotPositions(20, 2)).toEqual([6, 13]);
+    expect(randomSlotPositions(40, 2)).toEqual([13, 26]);
+  });
+
+  it('declines rather than steal from a slice too short to spare a slot', () => {
+    expect(randomSlotPositions(4, 1, 3)).toEqual([]); // 1 fixed + 3 reserved fresh
+    expect(randomSlotPositions(1, 1, 0)).toEqual([]);
+    expect(randomSlotPositions(0, 1, 0)).toEqual([]);
+    expect(randomSlotPositions(20, 0)).toEqual([]);
+  });
+
+  it('survives nonsense without inventing a slot', () => {
+    expect(randomSlotPositions(20, Number.NaN)).toEqual([]);
+    expect(randomSlotPositions(20, -3)).toEqual([]);
+    expect(randomSlotPositions(Number.NaN, 1)).toEqual([]);
+    expect(randomSlotPositions(20, 1, Number.NaN)).toEqual([10]);
+  });
+});
+
+describe('uniformPick — no scoring at all', () => {
+  it('ignores score entirely and covers the whole pool', () => {
+    const p = [{ score: 1000, id: 'a' }, { score: -1000, id: 'b' }, { score: 0, id: 'c' }];
+    const rng = mulberry32(31);
+    const hits = new Map<string, number>();
+    for (let i = 0; i < 3000; i += 1) {
+      const { id } = uniformPick(p, rng).pick;
+      hits.set(id, (hits.get(id) ?? 0) + 1);
+    }
+    for (const id of ['a', 'b', 'c']) {
+      expect(hits.get(id) ?? 0).toBeGreaterThan(3000 / 3 - 120);
+      expect(hits.get(id) ?? 0).toBeLessThan(3000 / 3 + 120);
+    }
+  });
+
+  it('consumes exactly one draw, and none for a pool of one', () => {
+    const c = counting(9);
+    uniformPick([{ id: 'x' }, { id: 'y' }], c.rng);
+    expect(c.draws()).toBe(1);
+    const d = counting(9);
+    expect(uniformPick([{ id: 'x' }], d.rng).drew).toBe(false);
+    expect(d.draws()).toBe(0);
+  });
+
+  it('stays in bounds for an rng that misbehaves', () => {
+    const p = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    expect(uniformPick(p, () => 1).pick.id).toBe('c');
+    expect(uniformPick(p, () => 1 - Number.EPSILON).pick.id).toBe('c');
+    expect(uniformPick(p, () => 5).pick.id).toBe('c');
+    expect(uniformPick(p, () => -5).pick.id).toBe('a');
+    expect(uniformPick(p, () => Number.NaN).pick.id).toBe('a');
+  });
+});
+
+describe('select — the reserved 1-in-20 random slot', () => {
+  // 30 plausible videos and 25 that a scorer would never, ever pick: at
+  // T = 0.08 a gap of 51 weighs exp(-637), which is 0 in float64. So any junk
+  // video in the slice arrived through the random slot and nowhere else.
+  const good = Array.from({ length: 30 }, (_, i) =>
+    sc({
+      videoId: `g${String(i).padStart(2, '0')}`, sellerId: `gs${i}`, categoryId: `gc${i % 6}`,
+      lane: i % 7 === 0 ? 'fresh' : 'trending', score: 1 - i / 100, minPriceCents: PRICES[i % 3],
+    })
+  );
+  const junk = Array.from({ length: 25 }, (_, i) =>
+    sc({
+      videoId: `j${String(i).padStart(2, '0')}`, sellerId: `js${i}`, categoryId: `jc${i % 6}`,
+      lane: 'trending', score: -50 - i, minPriceCents: PRICES[i % 3],
+    })
+  );
+  const mixed = [...good, ...junk];
+  const junkIds = new Set(ids(junk));
+  const junkIn = (slice: ScoredCandidate[]): number[] =>
+    slice.map((s, i) => (junkIds.has(s.videoId) ? i : -1)).filter((i) => i >= 0);
+
+  const SEEDS = 200;
+
+  it('is OFF by default — no unscored video ever reaches the slice', () => {
+    for (let seed = 0; seed < SEEDS; seed += 1) {
+      expect(junkIn(select(mixed, ctx(), opts({ seed })).slice)).toEqual([]);
+      expect(junkIn(select(mixed, ctx(), opts({ seed, randomSlots: 0 })).slice)).toEqual([]);
+    }
+  });
+
+  it('spends exactly one slot per 20, never two', () => {
+    let sliceWithJunk = 0;
+    for (let seed = 0; seed < SEEDS; seed += 1) {
+      const { slice } = select(mixed, ctx(), opts({ seed, randomSlots: randomSlotsForSlice(20) }));
+      expect(slice.length).toBe(20);
+      const at = junkIn(slice);
+      expect(at.length).toBeLessThanOrEqual(1); // one reserved slot, one video
+      if (at.length === 1) sliceWithJunk += 1;
+    }
+    // The slot is uniform over ~45 eligible videos of which 25 are junk, so it
+    // lands on junk about half the time. The band only has to prove the slot is
+    // genuinely being drawn — not scored, not skipped.
+    expect(sliceWithJunk / SEEDS).toBeGreaterThan(0.3);
+    expect(sliceWithJunk / SEEDS).toBeLessThan(0.85);
+  });
+
+  it('fills a RESERVED position, rather than swapping a video in afterwards', () => {
+    const reserved = randomSlotPositions(20, 1, SELECTION.FRESH_FLOOR);
+    for (let seed = 0; seed < SEEDS; seed += 1) {
+      const { slice } = select(mixed, ctx(), opts({ seed, randomSlots: 1 }));
+      for (const i of junkIn(slice)) expect(reserved).toContain(i);
+    }
+  });
+
+  it('never takes position 1', () => {
+    for (let seed = 0; seed < SEEDS; seed += 1) {
+      const { slice } = select(mixed, ctx(), opts({ seed, randomSlots: 1 }));
+      expect(slice[0].videoId).toBe('g00'); // still the single highest scorer
+    }
+  });
+
+  it('holds every hard constraint it did not relax — random is not broken', () => {
+    for (let seed = 0; seed < SEEDS; seed += 1) {
+      const { slice, relaxed } = select(mixed, ctx(), opts({ seed, randomSlots: 1 }));
+      assertConstraints(slice, relaxed);
+      expect(new Set(ids(slice)).size).toBe(slice.length);
+    }
+  });
+
+  it('refuses a candidate that would break constraint 1, however random it is', () => {
+    // temperature 0 makes every OTHER position deterministic, so this isolates
+    // the random slot completely: index 2 is the only thing that can vary.
+    const a = sc({ videoId: 'a', sellerId: 'SA', categoryId: 'CA', score: 10, minPriceCents: 1500 });
+    const b = sc({ videoId: 'b', sellerId: 'SB', categoryId: 'CB', score: 9, minPriceCents: 4000 });
+    // Ten traps that all share b's seller: legal anywhere except right after it.
+    const traps = Array.from({ length: 10 }, (_, i) =>
+      sc({
+        videoId: `t${i}`, sellerId: 'SB', categoryId: `tc${i % 3}`,
+        score: -50 - i, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const legals = Array.from({ length: 5 }, (_, i) =>
+      sc({
+        videoId: `l${i}`, sellerId: `SL${i}`, categoryId: `lc${i}`,
+        score: -60 - i, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const p = [a, b, ...traps, ...legals];
+    expect(randomSlotPositions(4, 1, 0)).toEqual([2]);
+
+    const landed = new Set<string>();
+    for (let seed = 0; seed < 300; seed += 1) {
+      const r = select(p, ctx(), opts({ seed, sliceSize: 4, freshFloor: 0, randomSlots: 1, temperature: 0 }));
+      expect(r.slice.length).toBe(4);
+      expect(ids(r.slice).slice(0, 2)).toEqual(['a', 'b']); // greedy, untouched
+      expect(r.slice[2].sellerId).not.toBe('SB'); // the trap is never taken
+      expect(r.sampled).toBe(true); // the random slot did draw
+      landed.add(r.slice[2].videoId);
+    }
+    // Uniform over the 5 legal videos — all of them turn up, and only them.
+    expect(landed).toEqual(new Set(['l0', 'l1', 'l2', 'l3', 'l4']));
+  });
+
+  it('never consumes a reserved fresh slot or drops the slice below the floor', () => {
+    // The only three fresh videos score worst in the pool, so the floor is paid
+    // entirely out of the reserved tail — exactly where the random slot must
+    // not reach.
+    const fresh = Array.from({ length: 3 }, (_, i) =>
+      sc({
+        videoId: `xf${i}`, sellerId: `xfs${i}`, categoryId: `xfc${i}`,
+        lane: 'fresh', score: -99 - i, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const rest = Array.from({ length: 60 }, (_, i) =>
+      sc({
+        videoId: `xr${String(i).padStart(2, '0')}`, sellerId: `xrs${i % 25}`, categoryId: `xrc${i % 6}`,
+        lane: 'trending', score: 1 - i / 100, minPriceCents: PRICES[i % 3],
+      })
+    );
+    for (let seed = 0; seed < 60; seed += 1) {
+      const { slice } = select([...rest, ...fresh], ctx(), opts({ seed, randomSlots: 1 }));
+      expect(slice.length).toBe(20);
+      expect(freshCount(slice)).toBeGreaterThanOrEqual(SELECTION.FRESH_FLOOR);
+      // Constraint 4's tail reservation, re-derived here rather than assumed:
+      // once only as many slots remain as fresh videos are still owed, every
+      // one of them must be fresh. The random slot sits in the body, so it can
+      // never be one of these positions — but if it draws a fresh video early
+      // that simply pays the floor down, which is why the rule is checked
+      // dynamically instead of asserting "the last three are fresh".
+      let freshSeen = 0;
+      for (let i = 0; i < slice.length; i += 1) {
+        const remaining = slice.length - i;
+        const stillNeeded = Math.max(0, SELECTION.FRESH_FLOOR - freshSeen);
+        if (remaining <= stillNeeded) expect(slice[i].lane).toBe('fresh');
+        if (slice[i].lane === 'fresh') freshSeen += 1;
+      }
+    }
+  });
+
+  it('pays the fresh floor out of the tail exactly as it did before, when the slot goes elsewhere', () => {
+    // Same fixture with the slot off: the floor is entirely a tail effect.
+    const fresh = Array.from({ length: 3 }, (_, i) =>
+      sc({
+        videoId: `yf${i}`, sellerId: `yfs${i}`, categoryId: `yfc${i}`,
+        lane: 'fresh', score: -99 - i, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const rest = Array.from({ length: 60 }, (_, i) =>
+      sc({
+        videoId: `yr${String(i).padStart(2, '0')}`, sellerId: `yrs${i % 25}`, categoryId: `yrc${i % 6}`,
+        lane: 'trending', score: 1 - i / 100, minPriceCents: PRICES[i % 3],
+      })
+    );
+    for (let seed = 0; seed < 20; seed += 1) {
+      const { slice } = select([...rest, ...fresh], ctx(), opts({ seed, randomSlots: 0 }));
+      expect(slice.slice(-3).every((s) => s.lane === 'fresh')).toBe(true);
+    }
+  });
+
+  it('leaves the impression-budget queue jump alone', () => {
+    // The owed video still lands in the first reserved fresh slot; the random
+    // slot sits in the body and cannot displace it.
+    const owedBudget: ImpressionBudget = {
+      impressionsDelivered: 3, budgetTotal: IMPRESSION_BUDGET_TOTAL,
+      windowStart: new Date('2026-08-18T00:00:00Z'), satisfied: false,
+    };
+    const body = Array.from({ length: 12 }, (_, i) =>
+      sc({
+        videoId: `ob${String(i).padStart(2, '0')}`, sellerId: `obs${i}`, categoryId: `obc${i % 4}`,
+        lane: 'trending', score: 1 - i / 100, minPriceCents: PRICES[i % 3],
+      })
+    );
+    const owedFresh = sc({
+      videoId: 'owed2', sellerId: 'owed2s', categoryId: 'owed2c',
+      lane: 'fresh', score: -5, minPriceCents: 12_000, budget: owedBudget,
+    });
+    // The pool has exactly one fresh video, so the floor of 1 is entirely on it.
+    const reserved = randomSlotPositions(6, 1, 1);
+    expect(reserved).toEqual([3]);
+    for (let seed = 0; seed < 40; seed += 1) {
+      const { slice } = select([...body, owedFresh], ctx(),
+        opts({ seed, sliceSize: 6, freshFloor: 1, randomSlots: 1 }));
+      expect(slice.length).toBe(6);
+      // The guarantee is still paid, every time. It arrives either in the
+      // reserved fresh slot at the tail (index 5) or, when the random slot
+      // happens to draw it, in the slot at index 3 — never anywhere its score
+      // would have had to earn.
+      expect(ids(slice)).toContain('owed2');
+      expect([3, 5]).toContain(ids(slice).indexOf('owed2'));
+    }
+  });
+
+  it('adds exactly one rng draw to the slice it is turned on for', () => {
+    const withOut = counting(77);
+    select(pool(60), ctx(), { rng: withOut.rng, temperature: 0 });
+    const withIn = counting(77);
+    select(pool(60), ctx(), { rng: withIn.rng, temperature: 0, randomSlots: 1 });
+    expect(withOut.draws()).toBe(0); // greedy: nothing stochastic at all
+    expect(withIn.draws()).toBe(1); // one slot, one draw
+  });
+});
+
+describe('select — spec 6.6 changes nothing until you ask for it', () => {
+  // Golden slices captured from the implementation as it stood BEFORE 6.6, so
+  // this fails loudly if the adaptive temperature or the random slot ever leaks
+  // into the default path and moves the numbers PR #9 reported.
+  const GOLDEN: Record<string, string[]> = {
+    p60_1: ['p000', 'p005', 'p001', 'p006', 'p021', 'p018', 'p003', 'p008', 'p010', 'p004',
+            'p031', 'p002', 'p011', 'p007', 'p012', 'p009', 'p013', 'p016', 'p014', 'p017'],
+    p60_7: ['p000', 'p001', 'p002', 'p020', 'p008', 'p006', 'p004', 'p007', 'p003', 'p011',
+            'p013', 'p005', 'p009', 'p017', 'p014', 'p010', 'p015', 'p012', 'p019', 'p018'],
+    p60_4242: ['p000', 'p004', 'p002', 'p015', 'p005', 'p008', 'p001', 'p003', 'p007', 'p009',
+               'p012', 'p014', 'p016', 'p011', 'p034', 'p006', 'p019', 'p022', 'p010', 'p020'],
+    p24_3: ['p000', 'p003', 'p001', 'p002', 'p004', 'p007', 'p006', 'p005', 'p008', 'p009',
+            'p011', 'p010', 'p012', 'p015', 'p014', 'p016', 'p018', 'p013', 'p019', 'p017'],
+    p24_11: ['p000', 'p002', 'p001', 'p004', 'p005', 'p007', 'p003', 'p006', 'p009', 'p010',
+             'p008', 'p012', 'p015', 'p011', 'p014', 'p016', 'p013', 'p017', 'p018', 'p019'],
+  };
+
+  const p60 = pool(60);
+  const p24 = pool(24);
+  const cases: [string, ScoredCandidate[], number][] = [
+    ['p60_1', p60, 1], ['p60_7', p60, 7], ['p60_4242', p60, 4242],
+    ['p24_3', p24, 3], ['p24_11', p24, 11],
+  ];
+
+  it('reproduces the pre-6.6 slice exactly with the default options', () => {
+    for (const [key, p, seed] of cases) {
+      expect(ids(select(p, ctx(), opts({ seed })).slice)).toEqual(GOLDEN[key]);
+    }
+  });
+
+  it('reproduces it with randomSlots explicitly 0', () => {
+    for (const [key, p, seed] of cases) {
+      expect(ids(select(p, ctx(), opts({ seed, randomSlots: 0 })).slice)).toEqual(GOLDEN[key]);
+    }
+  });
+
+  it('reproduces it for a viewer the platform already knows (200+ events -> 0.08)', () => {
+    for (const [key, p, seed] of cases) {
+      expect(ids(select(p, ctx(), opts({ seed, engagedEvents: 200 })).slice)).toEqual(GOLDEN[key]);
+      expect(ids(select(p, ctx(), opts({ seed, engagedEvents: 5000 })).slice)).toEqual(GOLDEN[key]);
+    }
+  });
+
+  it('reproduces the constraint-7 repair path unchanged', () => {
+    const seen = new Set(p60.slice(0, 8).map((c) => c.sellerId));
+    expect(ids(select(p60, ctx({ seenSellerIds: seen }), opts({ seed: 5 })).slice)).toEqual([
+      'p000', 'p006', 'p008', 'p002', 'p005', 'p001', 'p007', 'p011', 'p004', 'p018',
+      'p003', 'p016', 'p015', 'p013', 'p009', 'p012', 'p010', 'p026', 'p014', 'p023',
+    ]);
+  });
+
+  it('consumes the rng identically — same draws, same order', () => {
+    const before = counting(4242);
+    select(p60, ctx(), { rng: before.rng });
+    const after = counting(4242);
+    select(p60, ctx(), { rng: after.rng, engagedEvents: 200, randomSlots: 0 });
+    expect(after.draws()).toBe(before.draws());
   });
 });
