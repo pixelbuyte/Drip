@@ -309,17 +309,33 @@ INSERT INTO public.seller_trust (seller_id) SELECT id FROM public.profiles
   ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- Backfill. Against production this touches zero rows (nothing was ever
--- applied and the project is paused). It exists so a developer who ran
--- 00001-00006 locally does not lose their fixtures.
+-- Backfill.
+--
+-- This comment used to claim the backfill "touches zero rows" against
+-- production. That is FALSE and was the assumption behind two latent defects.
+-- The live project (tkppdmrkvyjixaiocwmd) forked from this chain in June and
+-- carries real rows: one seller and one drop, "Vintage Denim Jacket". The user
+-- chose reconciliation over reset precisely to keep them, so every statement
+-- below runs for real and must be non-destructive.
+--
+-- Two consequences that an empty drops table hides:
+--   * the live drop has no video (mux_playback_id IS NULL), so mapping
+--     active -> 'live' would violate videos_live_has_playback. 00012 section 4
+--     demotes such rows to 'processing' BEFORE this file runs.
+--   * the video_products insert queues a deferred constraint-trigger event,
+--     which blocks a later ALTER TABLE. See SET CONSTRAINTS below.
 -- ---------------------------------------------------------------------------
 
 -- A drop is a video with exactly one product. Reuse the drop's uuid as the
 -- video's so any hardcoded local link still resolves.
+-- d.image_url is carried into thumbnail_url. That column is created by the
+-- out-of-band 20260613050858 migration and exists only in production, so no
+-- repo migration declares it and this backfill originally ignored it -- which
+-- silently destroyed the live drop's only image at the DROP TABLE below.
 INSERT INTO public.videos
-  (id, seller_id, mux_upload_id, mux_asset_id, mux_playback_id,
+  (id, seller_id, mux_upload_id, mux_asset_id, mux_playback_id, thumbnail_url,
    caption, status, published_at, created_at, updated_at)
-SELECT d.id, d.seller_id, d.mux_upload_id, NULL, d.mux_playback_id,
+SELECT d.id, d.seller_id, d.mux_upload_id, NULL, d.mux_playback_id, d.image_url,
        d.description,
        CASE d.status WHEN 'active'   THEN 'live'::public.video_status
                      WHEN 'archived' THEN 'paused'::public.video_status
@@ -339,11 +355,16 @@ SELECT d.id, d.seller_id, left(d.title, 40),
        COALESCE((d.dimensions->>'height_in')::numeric, 2.0)
 FROM public.drops d;
 
+-- images: same reasoning as thumbnail_url above. products.images is
+-- text[] NOT NULL DEFAULT '{}' bounded to 8, so a one-element array is safe.
 INSERT INTO public.products
   (id, seller_id, slug, title, description, price_cents, inventory_count,
-   variants, shipping_profile_id, status, created_at, updated_at)
+   variants, images, shipping_profile_id, status, created_at, updated_at)
 SELECT d.id, d.seller_id, d.slug, d.title, d.description, d.price_cents,
-       d.inventory, d.variants, d.id,
+       d.inventory, d.variants,
+       CASE WHEN d.image_url IS NOT NULL THEN ARRAY[d.image_url]
+            ELSE '{}'::text[] END,
+       d.id,
        CASE WHEN d.status = 'archived' THEN 'archived'::public.product_status
             WHEN d.inventory > 0       THEN 'active'::public.product_status
             ELSE 'out_of_stock'::public.product_status END,
@@ -461,6 +482,31 @@ ALTER TABLE public.orders DROP COLUMN drop_id;
 DROP FUNCTION IF EXISTS public.decrement_inventory(uuid);
 DROP TRIGGER IF EXISTS drops_guard_status ON public.drops;
 DROP FUNCTION IF EXISTS public.guard_drop_status();
+-- drops.video_url has no destination in the feed model: a video is addressed
+-- by mux_playback_id, and inventing a column for a raw URL is a schema change,
+-- not a reconciliation. It is NULL for every row in production today, so
+-- nothing is lost there -- but a developer or staging database could hold one,
+-- and losing it silently in the DROP below would be indefensible. Say so
+-- loudly instead. WARNING, not EXCEPTION: this must not abort a production
+-- apply over a column production does not populate.
+DO $drops_video_url$
+DECLARE
+  n bigint;
+  ids text;
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema='public' AND table_name='drops'
+               AND column_name='video_url') THEN
+    EXECUTE 'SELECT count(*), string_agg(id::text, '', '')
+             FROM public.drops WHERE video_url IS NOT NULL'
+      INTO n, ids;
+    IF n > 0 THEN
+      RAISE WARNING 'drops.video_url is being discarded for % row(s) (%): the feed model has no column for a non-Mux video URL. Re-upload through Mux if these matter.', n, ids;
+    END IF;
+  END IF;
+END
+$drops_video_url$;
+
 DROP TABLE public.drops;
 
 -- Replacement, same shape and same posture as 00004/00006: a single
