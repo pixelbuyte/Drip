@@ -16,10 +16,14 @@ export default function FeedShell({
   initialItems,
   surface = 'for_you',
   initialExhausted = false,
+  query,
 }: {
   initialItems: FeedItem[];
   surface?: FeedSurface;
   initialExhausted?: boolean;
+  /** Present only for the search surface: redirects pagination to
+   * /api/search instead of /api/feed, carrying the query along. */
+  query?: string;
 }) {
   const [items, setItems] = useState<FeedItem[]>(initialItems);
   const [committed, setCommitted] = useState(0);
@@ -68,11 +72,13 @@ export default function FeedShell({
       // once a session got long enough, which read to the viewer as the feed
       // simply ending.
       const exclude = items.map((i) => i.videoId).slice(-200).join(',');
-      const url =
-        `/api/feed?session_id=${getSessionId()}&surface=${surface}` +
-        `&offset=${items.length}` +
-        (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '') +
-        (cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : '');
+      const url = query
+        ? `/api/search?session_id=${getSessionId()}&q=${encodeURIComponent(query)}` +
+          (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '')
+        : `/api/feed?session_id=${getSessionId()}&surface=${surface}` +
+          `&offset=${items.length}` +
+          (exclude ? `&exclude_ids=${encodeURIComponent(exclude)}` : '') +
+          (cursor.current ? `&before=${encodeURIComponent(cursor.current)}` : '');
       const res = await fetch(url, { credentials: 'same-origin' });
       if (!res.ok) return;
       const data = (await res.json()) as FeedResponse;
@@ -86,7 +92,7 @@ export default function FeedShell({
     } finally {
       loading.current = false;
     }
-  }, [items, surface, exhausted]);
+  }, [items, surface, exhausted, query]);
 
   const onCommit = useCallback(
     (index: number) => {

@@ -19,7 +19,7 @@ import {
 import { loadPool } from './pool';
 import { loadViewerContext } from './viewer-context';
 import { getFeedSlice, recordSlice, type SliceParams } from './slice';
-import { shapeSellableProducts, type ProductRow } from './products';
+import { loadFeedItemDetails } from './item-details';
 import { FEED_SLICE_SIZE, SSR_PLACEHOLDER_SESSION_ID, type FeedItem, type FeedLane } from './types';
 
 /**
@@ -135,94 +135,6 @@ async function loadRecentContext(
   }
 
   return { sellerIds, categoryIds, priceCents, seenSellerIds };
-}
-
-// ---------------------------------------------------------------------------
-// Final display details for the selected slice only
-// ---------------------------------------------------------------------------
-
-type FeedItemDetailsRow = {
-  id: string;
-  mux_playback_id: string | null;
-  duration_seconds: number;
-  aspect_ratio: string | null;
-  thumbnail_url: string | null;
-  caption: string | null;
-  hashtags: string[] | null;
-  categories: { slug: string } | { slug: string }[] | null;
-  profiles: {
-    id: string; handle: string; display_name: string; avatar_url: string | null;
-  } | null;
-  video_products: ProductRow[] | null;
-};
-
-type FeedItemDetails = Omit<FeedItem, 'lane' | 'position'>;
-
-/**
- * The pool only carries what scoring needs (`PoolVideo`), not display fields
- * (thumbnail, caption, seller handle, full product shaping). Rather than
- * widen the 500-video pool query with everything a `FeedItem` needs, this
- * fetches display details for ONLY the ~20 videos `select()` actually chose —
- * a fraction of the pool query's cost.
- *
- * `charges_enabled` is not re-checked here: the pool query already guaranteed
- * it moments earlier in the same request, and re-verifying it here would only
- * catch a seller losing payment eligibility mid-request, which the naive feed
- * does not guard against either.
- */
-async function loadFeedItemDetails(
-  db: SupabaseClient,
-  videoIds: readonly string[]
-): Promise<Map<string, FeedItemDetails>> {
-  const out = new Map<string, FeedItemDetails>();
-  if (videoIds.length === 0) return out;
-
-  // supabase-js cannot infer this nested select without blowing its
-  // instantiation depth (same issue slice.ts and pool.ts hit) — loosely
-  // typed for the chain, cast back to FeedItemDetailsRow[] once below.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query: any = db
-    .from('videos')
-    .select(`
-      id, mux_playback_id, duration_seconds, aspect_ratio, thumbnail_url, caption, hashtags,
-      categories ( slug ),
-      profiles ( id, handle, display_name, avatar_url ),
-      video_products ( position, pinned_at_second,
-        products ( id, title, price_cents, compare_at_price_cents, inventory_count,
-                   low_stock_threshold, images, variants, status ) )
-    `)
-    .in('id', videoIds);
-  const { data, error } = (await query) as {
-    data: FeedItemDetailsRow[] | null;
-    error: { message: string } | null;
-  };
-  if (error) throw new Error(`ranked feed item details query failed: ${error.message}`);
-
-  for (const v of data ?? []) {
-    const profile = one(v.profiles);
-    if (!profile) continue;
-    const products = shapeSellableProducts(v.video_products);
-    if (products.length === 0) continue;
-
-    out.set(v.id, {
-      videoId: v.id,
-      playbackId: v.mux_playback_id,
-      durationSeconds: v.duration_seconds,
-      aspectRatio: v.aspect_ratio,
-      thumbnailUrl: v.thumbnail_url,
-      caption: v.caption,
-      hashtags: v.hashtags ?? [],
-      categorySlug: one(v.categories)?.slug ?? null,
-      seller: {
-        id: profile.id,
-        handle: profile.handle,
-        displayName: profile.display_name,
-        avatarUrl: profile.avatar_url,
-      },
-      products,
-    });
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 const CHIPS = ['chunky white sneakers', 'lip oil', 'desk setup glow-up', 'gifts under $50', 'airport outfit'];
 
@@ -14,28 +15,46 @@ function Magnifier() {
 }
 
 export function SearchField({ className = '' }: { className?: string }) {
+  const router = useRouter();
+  const [value, setValue] = useState('');
+
+  const submit = () => {
+    const q = value.trim();
+    if (!q) return;
+    router.push(`/search?q=${encodeURIComponent(q)}`);
+  };
+
   return (
-    <label
+    <form
+      role="search"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
       className={`flex h-11 items-center gap-2.5 rounded-full border border-hairline-strong bg-card px-4 text-muted transition-[border-color,box-shadow] duration-200 focus-within:border-coral focus-within:shadow-[0_0_0_4px_rgba(255,75,46,0.18)] ${className}`}
     >
       <Magnifier />
       <input
         type="search"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
         placeholder="What are you looking for?"
         className="w-full bg-transparent text-[15px] text-ink outline-none placeholder:text-muted"
         aria-label="Search products"
       />
-    </label>
+    </form>
   );
 }
 
 export function SearchChips({ className = '' }: { className?: string }) {
+  const router = useRouter();
   return (
     <div className={`rail md:flex-wrap md:overflow-visible ${className}`}>
       {CHIPS.map((c) => (
         <button
           key={c}
           type="button"
+          onClick={() => router.push(`/search?q=${encodeURIComponent(c)}`)}
           className="whitespace-nowrap rounded-full border border-hairline-strong bg-card px-3.5 py-1.5 text-[13px] font-semibold text-ink transition-colors duration-150 hover:border-coral/30 hover:bg-coral/10 hover:text-coral-deep"
         >
           {c}
