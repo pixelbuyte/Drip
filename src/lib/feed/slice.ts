@@ -45,7 +45,15 @@ type VideoRow = {
   thumbnail_url: string | null; caption: string | null;
   hashtags: string[] | null; published_at: string;
   categories: { slug: string } | null;
-  profiles: { id: string; handle: string; display_name: string; avatar_url: string | null } | null;
+  profiles: {
+    id: string; handle: string; display_name: string; avatar_url: string | null;
+    // Nested, not a direct column: charges_enabled moved off profiles onto
+    // seller_payments in the June PII split (profiles is publicly readable;
+    // a payment-processor flag has no business being there). This used to
+    // be selected straight off profiles, which does not exist on the
+    // reconciled schema and would 500 every feed request.
+    seller_payments: { charges_enabled: boolean } | { charges_enabled: boolean }[] | null;
+  } | null;
   video_products: ProductRow[] | null;
 };
 
@@ -78,14 +86,16 @@ export async function getFeedSlice(
       id, seller_id, mux_playback_id, duration_seconds, aspect_ratio,
       thumbnail_url, caption, hashtags, published_at,
       categories!inner ( slug ),
-      profiles!inner ( id, handle, display_name, avatar_url, charges_enabled ),
+      profiles!inner ( id, handle, display_name, avatar_url,
+        seller_payments!inner ( charges_enabled ) ),
       video_products ( position, pinned_at_second,
         products ( id, title, price_cents, compare_at_price_cents, inventory_count,
                    low_stock_threshold, images, variants, status ) )
     `)
     .eq('status', 'live')
-    // Seller must actually be able to take money (spec 2.2).
-    .eq('profiles.charges_enabled', true)
+    // Seller must actually be able to take money (spec 2.2). charges_enabled
+    // lives on seller_payments, not profiles — see the VideoRow comment.
+    .eq('profiles.seller_payments.charges_enabled', true)
     .not('published_at', 'is', null)
     .order('published_at', { ascending: false })
     .limit(overFetch);
