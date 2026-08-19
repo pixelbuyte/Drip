@@ -15,7 +15,7 @@ export async function POST() {
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id, stripe_account_id, charges_enabled')
+    .select('id')
     .eq('id', user.id)
     .single();
 
@@ -26,11 +26,34 @@ export async function POST() {
     );
   }
 
+  // Stripe Connect state (stripe_account_id, charges_enabled) and the seller's
+  // ship-from address live on `seller_payments`, NOT on `profiles`: profiles
+  // carries a public read policy (profiles_public_read_handle, USING (true)),
+  // and a Stripe account id — like the seller's physical home address — must
+  // never sit in a publicly readable table. Do not move these columns back.
+  //
+  // seller_payments is reached with the service role rather than the caller's
+  // client: nothing on this table is seller-writable (stripe_account_id is
+  // attested by Stripe, not by the seller). Authorization is unchanged — the
+  // caller must still be an authenticated user, and every statement below is
+  // pinned to their own id.
+  const admin = createAdminClient();
+
+  const { data: payments } = await admin
+    .from('seller_payments')
+    .select('stripe_account_id')
+    .eq('seller_id', user.id)
+    .maybeSingle();
+
   const stripe = getStripe();
   const appUrl = process.env.NEXT_PUBLIC_APP_URL!;
 
   try {
-    let accountId = profile.stripe_account_id;
+    // No seller_payments row at all is the ordinary brand-new-seller path
+    // (profile created before onboarding ever started): it means "not yet
+    // connected", exactly like a row with a null stripe_account_id. The row is
+    // created below, together with the Stripe account.
+    let accountId: string | null = payments?.stripe_account_id ?? null;
 
     if (!accountId) {
       const account = await stripe.accounts.create({
@@ -54,15 +77,15 @@ export async function POST() {
 
       accountId = account.id;
 
-      // stripe_account_id is attested by Stripe, not by the seller: the
-      // authenticated role has no UPDATE privilege on it (migration 00006),
-      // so this write goes through the service role.
-      const { error: updateError } = await createAdminClient()
-        .from('profiles')
-        .update({ stripe_account_id: accountId })
-        .eq('id', user.id);
+      // Upsert, not update: the row may not exist yet (brand-new seller), and
+      // it may already exist for a seller who saved a ship-from address before
+      // connecting Stripe. seller_id is taken from the verified session, so
+      // this can only ever touch the caller's own row.
+      const { error: upsertError } = await admin
+        .from('seller_payments')
+        .upsert({ seller_id: user.id, stripe_account_id: accountId }, { onConflict: 'seller_id' });
 
-      if (updateError) {
+      if (upsertError) {
         return NextResponse.json({ error: 'Failed to save Stripe account' }, { status: 500 });
       }
     }
