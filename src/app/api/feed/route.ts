@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
 import { ANON_COOKIE, verifyAnonId } from '@/lib/anon-id';
-import { getFeedSlice, recordSlice } from '@/lib/feed/slice';
+import { getFeedSliceRankedOrNaive, resolveCountryCode } from '@/lib/feed/ranked-slice';
 import { FEED_SLICE_SIZE, type FeedResponse, type FeedSurface } from '@/lib/feed/types';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const db = createAdminClient();
-    const { items, exhausted, nextBefore } = await getFeedSlice(db, {
+    const { items, exhausted, nextBefore } = await getFeedSliceRankedOrNaive(db, {
       anonId,
       sessionId: params.session_id,
       surface: params.surface as FeedSurface,
@@ -69,14 +69,8 @@ export async function GET(request: NextRequest) {
       sellerHandle: params.seller ?? null,
       limit: FEED_SLICE_SIZE,
       before: params.before ?? null,
-    });
-
-    // Non-blocking: attribution is useful, but never at the cost of the feed.
-    void recordSlice(db, {
-      sessionId: params.session_id,
-      anonId,
-      items,
       offset: params.offset,
+      countryCode: resolveCountryCode(request.headers.get('x-vercel-ip-country')),
     });
 
     const body: FeedResponse = {

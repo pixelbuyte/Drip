@@ -150,6 +150,29 @@ describe('loadViewerContext', () => {
     expect(ctx.purchasedSellerIds).toEqual(new Set(['s1']));
   });
 
+  it('resolves hasUnpurchasedItems against liveProductIdsByVideoId when given', async () => {
+    const ctx = await loadViewerContext(
+      sourceOf({
+        orders: [
+          {
+            seller_id: 's1',
+            video_id: 'v1',
+            created_at: '2026-08-01T00:00:00Z',
+            order_items: [{ video_id: null, product_id: 'p1' }],
+          },
+        ],
+      }),
+      {
+        anonId: 'a1',
+        countryCode: 'US',
+        excludeIds: new Set(),
+        liveProductIdsByVideoId: new Map([['v1', new Set(['p1'])]]),
+      }
+    );
+    // The viewer bought the video's only live product -> nothing left to buy.
+    expect(ctx.purchasesByVideoId?.get('v1')?.hasUnpurchasedItems).toBe(false);
+  });
+
   it('excludeIds is passed through unchanged', async () => {
     const excludeIds = new Set(['x1', 'x2']);
     const ctx = await loadViewerContext(sourceOf({}), { anonId: 'a1', countryCode: 'US', excludeIds });

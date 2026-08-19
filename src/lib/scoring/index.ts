@@ -43,3 +43,4 @@ export * from './guardrails';
 // shipped default rather than failing the feed over a missing refinement.
 export * from './medians';
 export * from './weights';
+export * from './bucket';

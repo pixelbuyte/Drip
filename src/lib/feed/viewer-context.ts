@@ -29,6 +29,15 @@ export type LoadViewerContextOptions = {
   anonId: string;
   countryCode: string;
   excludeIds: ReadonlySet<string>;
+  /**
+   * The pool's CURRENT live product ids per video, so `hasUnpurchasedItems`
+   * can be resolved accurately in this same call rather than needing a
+   * separate pass. Omit it (the common case for a caller with no pool loaded
+   * yet) and every purchased video defaults to `hasUnpurchasedItems: true` —
+   * the same safe "assume there might be more to buy" default
+   * `loadPurchaseHistory` already documents.
+   */
+  liveProductIdsByVideoId?: ReadonlyMap<string, ReadonlySet<string>>;
 };
 
 type ViewerProfileRow = {
@@ -191,9 +200,14 @@ export async function loadViewerContext(
     notInterestedSellerIds: blocks.blockedSellers,
     followedSellerIds,
     purchasedSellerIds: purchases.purchasedSellerIds,
-    purchasesByVideoId: purchases.purchasesByVideoId,
+    purchasesByVideoId: resolveUnpurchasedItems(
+      purchases.purchasesByVideoId,
+      opts.liveProductIdsByVideoId ?? EMPTY_LIVE_PRODUCTS
+    ),
   };
 }
+
+const EMPTY_LIVE_PRODUCTS: ReadonlyMap<string, ReadonlySet<string>> = new Map();
 
 /**
  * Given the pool's live products for a video, resolve whether this viewer's
