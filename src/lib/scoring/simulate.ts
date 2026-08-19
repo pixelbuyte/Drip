@@ -60,7 +60,7 @@
 // from their true appeal with binomial-ish noise. That is not a cheat, it is
 // the modelling assumption: the 2,000 simulated sessions are a SAMPLE of the
 // platform's traffic, not the whole of it. The baseline volume is log-uniform
-// across four orders of magnitude on purpose, so the pool contains genuine
+// across three and a half orders of magnitude on purpose, so the pool contains genuine
 // small-sample flukes ("1 purchase in 3 impressions") alongside genuinely
 // proven videos — the exact pair the evidence gate exists to separate.
 //
@@ -266,6 +266,18 @@ export type WorldConfig = {
    * guardrail would be measuring the world's sizing rather than the code.
    * `budget.demandShare` in the result reports what fraction of all impressions
    * the guarantee actually demanded, so this assumption is auditable.
+   *
+   * MEASURED CAPACITY, at 1,500 sessions x 5 seeds on the default world:
+   *
+   *   3/day  -> demand 10.6% of impressions, 100% delivery on 5/5 seeds
+   *   4/day  -> demand 13.8% of impressions, 100% on 4/5 seeds; one seed
+   *             starved a video
+   *
+   * The fresh lane's REALISED share is ~10% of impressions (floor 3 of 20 =
+   * 15%, minus the reserved tail slots lost to mid-slice abandonment), and that
+   * is the hard ceiling on how many new videos the guarantee can cover. The
+   * default is set below it deliberately: a guardrail should measure the
+   * ranker, not the fact that the world was asked for more than it has.
    */
   newVideosPerDay: number;
   /** Slices a viewer may request in one session. */
@@ -316,7 +328,7 @@ export const DEFAULT_WORLD: WorldConfig = {
   sellers: 120,
   videosPerSeller: 5,
   sessionsPerDay: 500,
-  newVideosPerDay: 4,
+  newVideosPerDay: 3,
   maxSlices: 3,
   sliceSize: SELECTION.SLICE_SIZE,
   targetCandidates: 500,
@@ -1010,8 +1022,12 @@ export type SimulationResult = {
 // The run
 // ---------------------------------------------------------------------------
 
-/** Uniforms drawn per impression, used or not. See the determinism note above. */
-const DRAWS_PER_IMPRESSION = 12;
+/**
+ * Uniforms drawn per impression, USED OR NOT. The block is fixed-size so that
+ * position i of a session always consumes draws [13i, 13i+13) whichever
+ * strategy is running — see the determinism note at the top of the file.
+ */
+const DRAWS_PER_IMPRESSION = 13;
 
 /** Interactions before a viewer stops being a cold start. */
 const COLD_START_INTERACTIONS = 8;
@@ -1087,6 +1103,13 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
 
   const viewerCount = Math.max(8, Math.floor(cfg.viewers ?? Math.max(24, Math.round(sessions / 8))));
   const startMs = cfg.startedAt.getTime();
+  // Sessions start on a fixed cadence and each lasts as long as its viewer
+  // stays, so at realistic densities they OVERLAP — which is what concurrent
+  // viewers do. One consequence is worth naming: events land in a video's
+  // window buffer very slightly out of timestamp order, by at most one
+  // session's length, so the 24h/1h boundaries are accurate to within that. The
+  // running sums stay exact either way — they are always the sum of a suffix of
+  // the append order, whatever that order is.
   const sessionGapMs = Math.max(1, Math.round(MS_DAY / Math.max(1, cfg.sessionsPerDay)));
   const dwellMs = Math.max(1, Math.round(cfg.dwellSeconds * 1000));
   const durationMs = sessionGapMs * sessions;
@@ -1136,6 +1159,8 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
   // ---- live catalogue ----------------------------------------------------
   const live: SimVideo[] = [...videos];
   const livePool: PoolVideo[] = live.map((v) => v.pool);
+  const byId = new Map<string, SimVideo>();
+  for (const v of live) byId.set(v.videoId, v);
   const categoryLive = new Map<string, number>();
   for (const v of live) categoryLive.set(v.categoryId, (categoryLive.get(v.categoryId) ?? 0) + 1);
   let nextPublish = 0;
@@ -1190,6 +1215,7 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
       const v = pending[nextPublish++];
       live.push(v);
       livePool.push(v.pool);
+      byId.set(v.videoId, v);
       categoryLive.set(v.categoryId, (categoryLive.get(v.categoryId) ?? 0) + 1);
     }
 
@@ -1232,6 +1258,11 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
       purchasesByVideoId: viewer.purchasesByVideoId,
     };
 
+    // Once per session, not once per slice. A production request would
+    // regenerate, but the pool is stable over the couple of minutes a session
+    // lasts and regenerating costs ~5 whole-catalogue sorts per slice. Videos
+    // already served are filtered at scoring time instead, which is what
+    // `excludeIds` would otherwise have done.
     const generated = generateCandidates(livePool, viewerCtx, {
       rng: genRng,
       now: sessionStart,
@@ -1240,8 +1271,6 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
       coldStartLaneShares: cfg.coldStartLaneShares,
     });
     diag.freshCandidates += generated.byLane.fresh.length;
-    const byId = new Map<string, SimVideo>();
-    for (const v of live) byId.set(v.videoId, v);
 
     let state: AdaptiveSessionState = initialSessionState(`sess-${s}`, sessionStart);
     const recent: RecentContext = {
@@ -1499,12 +1528,12 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
           }
         }
 
-        if (u[10] < rates.notInterested) {
+        if (u[11] < rates.notInterested) {
           v.simNotInterested += 1;
           viewer.notInterestedVideoIds.add(cand.videoId);
           affinityEvents.push({ type: 'not_interested', categoryId: cand.categoryId, sellerId: cand.sellerId });
         }
-        if (u[10] > 1 - rates.report) v.simReports += 1;
+        if (u[12] < rates.report) v.simReports += 1;
 
         v.events.push(ev);
         addTo(v.w24, ev);
@@ -1512,7 +1541,7 @@ export function runSimulation(opts: SimulationOptions = {}): SimulationResult {
 
         // Leaving is a real outcome and a skippy feed earns more of it.
         const pLeave = Math.min(0.3, 0.002 + 0.008 * state.consecutiveFastSkips);
-        if (u[11] < pLeave) {
+        if (u[10] < pLeave) {
           abandoned = true;
           break;
         }
