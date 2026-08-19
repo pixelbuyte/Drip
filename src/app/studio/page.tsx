@@ -418,6 +418,9 @@ function buildTodos(
 ): Todo[] {
   const todos: Todo[] = [];
   const liveIds = new Set(liveVideos.map((v) => v.videoId));
+  // One video should not eat two of the three slots: a seller with one
+  // problematic upload would then see nothing about the rest of their work.
+  const claimed = new Set<string>();
 
   // 1. Money leaking right now: a live video selling something nobody can buy.
   const soldOutLink = links.find((l) => {
@@ -432,6 +435,7 @@ function buildTodos(
       text: `“${truncate(product?.title ?? 'A product')}” is sold out but its video is still live — restock it or swap the product`,
       href: STUDIO_ROUTES.video(soldOutLink.video_id),
     });
+    claimed.add(soldOutLink.video_id);
   }
 
   // 2. Nothing can pay out.
@@ -464,13 +468,16 @@ function buildTodos(
   const newest = liveVideos[0];
 
   // 4. The guarantee finished — the 500 have an answer in them.
-  const finished = liveVideos.find((v) => v.budgetDelivered >= v.budgetTotal);
+  const finished = liveVideos.find(
+    (v) => v.budgetDelivered >= v.budgetTotal && !claimed.has(v.videoId)
+  );
   if (finished) {
     todos.push({
       kind: 'review_funnel',
       text: `“${truncate(finished.title)}” finished its ${count(finished.budgetTotal)} — see what they did with it`,
       href: STUDIO_ROUTES.video(finished.videoId),
     });
+    claimed.add(finished.videoId);
   }
 
   // 5. Freshness has decayed. Half-life is 72h, so a week is three halvings.
@@ -596,6 +603,41 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** The list on its own, so a caller can supply its own heading. */
+function TodoItems({ todos }: { todos: Todo[] }) {
+  if (todos.length === 0) return null;
+  return (
+    <ul className="mt-3 grid grid-cols-1 gap-2.5">
+      {todos.map((todo) => (
+        <li key={todo.kind}>
+          <Link
+            href={todo.href}
+            className="flex min-h-[60px] items-center justify-between gap-3 rounded-card bg-card px-4 py-3.5 shadow-card transition-transform duration-150 active:scale-[0.99]"
+          >
+            <span className="text-[14px] font-semibold leading-[1.45] text-ink">
+              {todo.text}
+            </span>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="shrink-0 text-coral"
+              aria-hidden
+            >
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function TodoList({ todos }: { todos: Todo[] }) {
   if (todos.length === 0) return null;
   return (
@@ -603,34 +645,7 @@ function TodoList({ todos }: { todos: Todo[] }) {
       <h2 className="font-display text-[20px] font-extrabold tracking-[-0.02em] text-ink">
         Worth doing next
       </h2>
-      <ul className="mt-3 grid grid-cols-1 gap-2.5">
-        {todos.map((todo) => (
-          <li key={todo.kind}>
-            <Link
-              href={todo.href}
-              className="flex min-h-[60px] items-center justify-between gap-3 rounded-card bg-card px-4 py-3.5 shadow-card transition-transform duration-150 active:scale-[0.99]"
-            >
-              <span className="text-[14px] font-semibold leading-[1.45] text-ink">
-                {todo.text}
-              </span>
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.25"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="shrink-0 text-coral"
-                aria-hidden
-              >
-                <path d="M9 6l6 6-6 6" />
-              </svg>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <TodoItems todos={todos} />
     </section>
   );
 }
@@ -678,7 +693,7 @@ export default async function StudioPulsePage() {
     <div className="mx-auto w-full max-w-[560px] px-5 pt-6 md:max-w-[900px] md:px-10 md:pt-10">
       {seller.founding?.isFounding && <FoundingBadge status={seller.founding} />}
       {firstRun ? (
-        <FirstRun seller={seller} todos={pulse.todos} />
+        <FirstRun todos={pulse.todos} />
       ) : (
         <Active pulse={pulse} monthIso={monthIso} />
       )}
@@ -692,7 +707,7 @@ export default async function StudioPulsePage() {
  * bar as a preview of the thing they are about to watch fill, and one CTA.
  * Emphatically not "$0.00" repeated over four empty cards.
  */
-function FirstRun({ seller, todos }: { seller: StudioSeller; todos: Todo[] }) {
+function FirstRun({ todos }: { todos: Todo[] }) {
   const setupTodos = todos.filter((t) => t.kind !== 'post_first_video');
 
   return (
@@ -753,11 +768,9 @@ function FirstRun({ seller, todos }: { seller: StudioSeller; todos: Todo[] }) {
             Before your first sale
           </h2>
           <p className="mt-1.5 text-[14px] text-muted">
-            {seller.chargesEnabled && seller.hasShipFromAddress
-              ? 'You are set up. Nothing here is blocking you.'
-              : 'A sale cannot complete until these are done.'}
+            A sale cannot complete until these are done.
           </p>
-          <TodoList todos={setupTodos} />
+          <TodoItems todos={setupTodos} />
         </section>
       )}
 
