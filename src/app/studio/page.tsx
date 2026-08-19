@@ -184,6 +184,16 @@ async function loadPulse(): Promise<PulseData | null> {
   // Payment state comes from seller_payments, never from profiles: profiles
   // has a public read policy, and the Stripe id plus the seller's home
   // address were moved off it deliberately.
+  // seller_payments is read with the SERVICE ROLE, same as /studio/money and
+  // for the same reason: the reconcile migration (00006) revokes every
+  // privilege on that table from `anon` and `authenticated` (it holds the
+  // payout destination and the seller's home address), so a caller-scoped
+  // read is permission-denied on every request — which `safe()` flattens to
+  // null and this page then rendered as a permanent false "Connect payouts /
+  // Add your ship-from address" pair of todos for fully onboarded sellers.
+  // The read stays pinned to the caller's own id, so authorisation is
+  // unchanged.
+  const admin = adminOrNull();
   const [profile, payments] = await Promise.all([
     safe<ProfileRow>(
       supabase
@@ -192,13 +202,15 @@ async function loadPulse(): Promise<PulseData | null> {
         .eq('id', userId)
         .maybeSingle()
     ),
-    safe<PaymentsRow>(
-      supabase
-        .from('seller_payments')
-        .select('stripe_account_id, charges_enabled, from_address')
-        .eq('seller_id', userId)
-        .maybeSingle()
-    ),
+    admin
+      ? safe<PaymentsRow>(
+          admin
+            .from('seller_payments')
+            .select('stripe_account_id, charges_enabled, from_address')
+            .eq('seller_id', userId)
+            .maybeSingle()
+        )
+      : Promise.resolve(null),
   ]);
 
   const seller: StudioSeller = {
@@ -208,7 +220,7 @@ async function loadPulse(): Promise<PulseData | null> {
     avatarUrl: profile?.avatar_url ?? null,
     chargesEnabled: Boolean(payments?.charges_enabled),
     hasShipFromAddress: Boolean(payments?.from_address),
-    founding: await loadFounding(supabase, profile?.created_at ?? null),
+    founding: await loadFounding(admin, profile?.created_at ?? null),
   };
 
   // ── Live videos and their reach-guarantee progress ──────────────────────
@@ -230,7 +242,6 @@ async function loadPulse(): Promise<PulseData | null> {
   // impressions and the exploration budget are seller-private and readable
   // only by the service role. Safe because videoIds came from a query already
   // filtered to this seller — the admin client never widens the row set.
-  const admin = adminOrNull();
   const statRows =
     videoIds.length > 0 && admin
       ? ((await safe<StatRow[]>(
@@ -380,16 +391,19 @@ async function loadPulse(): Promise<PulseData | null> {
 }
 
 /**
- * Founding-seller cohort by signup order. `profiles` is publicly readable, so
- * this is a plain count of accounts created no later than this one.
+ * Founding-seller cohort by signup order. Counted with the SERVICE ROLE, not
+ * the caller: `profiles`' public-read policy is scoped TO anon, and the
+ * authenticated role only matches the self-read policy — so a caller-scoped
+ * count sees exactly one row and every seller was "Founding seller #1". Only
+ * an aggregate count leaves this query; no other seller's row data does.
  */
 async function loadFounding(
-  supabase: Awaited<ReturnType<typeof createServerClient_>>,
+  admin: ReturnType<typeof adminOrNull>,
   createdAt: string | null
 ): Promise<FoundingSellerStatus | null> {
-  if (!createdAt) return null;
+  if (!createdAt || !admin) return null;
   try {
-    const { count: n, error } = await supabase
+    const { count: n, error } = await admin
       .from('profiles')
       .select('id', { count: 'exact', head: true })
       .lte('created_at', createdAt);

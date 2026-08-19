@@ -242,6 +242,38 @@ describe('recordFeedEventsForAffinity', () => {
     expect(seen).toEqual([]);
   });
 
+  it('decay is measured from affinity_computed_at, not the frozen updated_at', async () => {
+    // updated_at is never advanced by the upsert (no update trigger on
+    // viewer_profiles), so measuring decay from it applied 0.97^(profile age)
+    // on EVERY batch — a 90-day-old viewer's whole history was multiplied by
+    // ~0.065 each time, letting any single new event overwhelm it. With the
+    // clock on affinity_computed_at (written every pass), one day of decay
+    // (0.97) leaves the accumulated c1 mass dominant over one new like on c2.
+    let upserted: Record<string, unknown> | null = null;
+    const db = sourceOf({
+      videos: [{ id: 'v1', seller_id: 's1', category_id: 'c2', hashtags: [] }],
+      viewerProfile: {
+        // Three keys, not two: normalizeWithCap's n=2 feasibility floor pins
+        // any two-key map at exactly 0.5/0.5, masking the comparison below.
+        category_affinity: { c1: 0.6, c3: 0.4 },
+        seller_affinity: {},
+        hashtag_affinity: {},
+        price_band: null,
+        scored_impressions: 40,
+        affinity_computed_at: '2026-08-09T00:00:00Z', // 1 day before NOW
+        updated_at: '2026-05-12T00:00:00Z', // 90 days before NOW — must be ignored
+      },
+      onUpsert: (row) => { upserted = row; },
+    });
+    const events: RawFeedEvent[] = [{ t: 'like', v: 'v1' }];
+    await recordFeedEventsForAffinity(db, { anonId: 'a1', events, now: NOW });
+    const row = upserted as unknown as { category_affinity: Record<string, number> } | null;
+    expect(row).not.toBeNull();
+    // Under the updated_at bug this inverts: 0.97^90 ≈ 0.065 of c1 vs 0.3 of
+    // c2 puts c2 on top. With the fix, 0.97 of c1 vs 0.3 of c2 keeps c1 first.
+    expect(row!.category_affinity.c1).toBeGreaterThan(row!.category_affinity.c2);
+  });
+
   it('an unfollow event nudges seller affinity down when the video meta resolves the seller', async () => {
     // See the fast_skip test above: a two-key map's cap floor (1/n = 0.5)
     // masks any negative delta by redistributing right back to 0.5/0.5.

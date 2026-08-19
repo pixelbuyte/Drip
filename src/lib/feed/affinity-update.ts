@@ -123,7 +123,9 @@ async function loadExistingProfile(
 ): Promise<ViewerProfileRow | null> {
   const { data } = await db
     .from('viewer_profiles')
-    .select('category_affinity, seller_affinity, hashtag_affinity, price_band, scored_impressions, updated_at')
+    .select(
+      'category_affinity, seller_affinity, hashtag_affinity, price_band, scored_impressions, affinity_computed_at, updated_at'
+    )
     .eq('anon_id', anonId)
     .maybeSingle();
   return data as ViewerProfileRow | null;
@@ -143,6 +145,7 @@ type ViewerProfileRow = {
   hashtag_affinity: Record<string, number>;
   price_band: unknown;
   scored_impressions: number;
+  affinity_computed_at: string | null;
   updated_at: string;
 };
 
@@ -180,8 +183,18 @@ export async function recordFeedEventsForAffinity(
         }
       : EMPTY_PROFILE;
 
-    const daysElapsed = row
-      ? Math.max(0, (args.now.getTime() - new Date(row.updated_at).getTime()) / 86_400_000)
+    // Decay is measured from the LAST AFFINITY PASS, which is
+    // affinity_computed_at — the timestamp this function itself writes on
+    // every upsert. It used to be measured from updated_at, which nothing
+    // advances (viewer_profiles has no update trigger and the upsert never
+    // writes it), so daysElapsed equaled the profile's total age and
+    // decayAffinity applied 0.97^age to the whole map on EVERY batch — a
+    // long-tenured viewer's affinity collapsed toward cold-start a little
+    // more with each event they sent. updated_at remains only as the
+    // fallback for rows written before affinity_computed_at existed.
+    const lastComputedAt = row ? (row.affinity_computed_at ?? row.updated_at) : null;
+    const daysElapsed = lastComputedAt
+      ? Math.max(0, (args.now.getTime() - new Date(lastComputedAt).getTime()) / 86_400_000)
       : 0;
 
     const result = updateViewerAffinityWithSignals({

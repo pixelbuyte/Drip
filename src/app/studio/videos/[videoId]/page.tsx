@@ -11,7 +11,7 @@ import {
   STUDIO_ROUTES,
   type FunnelStep,
 } from '@/lib/studio/types';
-import { count, money, pct, progressPct, ratioLabel, sinceLabel } from '@/lib/studio/format';
+import { count, hoursSince, money, pct, progressPct, ratioLabel, sinceLabel } from '@/lib/studio/format';
 import {
   MIN_FUNNEL_IMPRESSIONS,
   MIN_MEDIAN_SAMPLE,
@@ -270,9 +270,16 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
           admin.from('video_stats').select(STAT_COLUMNS).eq('video_id', video.id).maybeSingle()
         )
       : Promise.resolve(null),
-    video.category_id
+    // Peer ids come from the SERVICE ROLE: videos_public_read_live is scoped
+    // TO anon, and `authenticated` only matches videos_owner_all — so a
+    // caller-scoped read returned only this seller's OWN other videos and
+    // every "category benchmark" downstream (peer stats, medians, shipping,
+    // reach) silently compared the seller against themselves. Only ids leave
+    // this query, and only aggregate medians are ever rendered from them —
+    // the same justification categoryShipping already documents.
+    video.category_id && admin
       ? safe<{ id: string }[]>(
-          supabase
+          admin
             .from('videos')
             .select('id')
             .eq('category_id', video.category_id)
@@ -540,10 +547,14 @@ function GuaranteeCard({
   delivered,
   total,
   title,
+  windowOpen,
 }: {
   delivered: number;
   total: number;
   title: string;
+  /** The 48h window is still open. Past it, "N more coming within 48 hours"
+   *  is a stale promise — same gate the pulse page applies. */
+  windowOpen: boolean;
 }) {
   const progress = progressPct(delivered, total);
   const remaining = Math.max(0, total - delivered);
@@ -551,11 +562,13 @@ function GuaranteeCard({
   return (
     <section className="rounded-card bg-card p-5 shadow-card md:p-7">
       <span className="inline-block rounded-full bg-coral/10 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.07em] text-coral-deep">
-        Delivering
+        {windowOpen ? 'Delivering' : 'First-day window closed'}
       </span>
 
       <h2 className="mt-4 font-display text-[24px] font-extrabold leading-[1.1] tracking-[-0.025em] text-ink">
-        Nothing to read yet — the guarantee is still running.
+        {windowOpen
+          ? 'Nothing to read yet — the guarantee is still running.'
+          : 'Nothing to read yet.'}
       </h2>
 
       <div className="mt-5 flex items-baseline justify-between gap-3">
@@ -586,10 +599,14 @@ function GuaranteeCard({
       </div>
 
       <p className="mt-3 text-[14px] leading-[1.55] text-muted">
-        {count(remaining)} more impressions are coming within {REACH_GUARANTEE_WINDOW_HOURS} hours
-        of posting, whether or not anyone follows you. The funnel below fills in as they land —
-        it needs about {count(MIN_FUNNEL_IMPRESSIONS)} before a comparison against your category
-        means anything.
+        {windowOpen
+          ? `${count(remaining)} more impressions are coming within ${REACH_GUARANTEE_WINDOW_HOURS} hours ` +
+            'of posting, whether or not anyone follows you. The funnel below fills in as they land — ' +
+            `it needs about ${count(MIN_FUNNEL_IMPRESSIONS)} before a comparison against your category ` +
+            'means anything.'
+          : `The first-day window ended at ${count(delivered)} of ${count(total)}. Everything from ` +
+            'here on is earned reach; the funnel fills in as impressions land — it needs about ' +
+            `${count(MIN_FUNNEL_IMPRESSIONS)} before a comparison against your category means anything.`}
       </p>
     </section>
   );
@@ -979,6 +996,10 @@ export default async function StudioVideoReportPage({
             delivered={report.budgetDelivered}
             total={report.budgetTotal}
             title={video.title}
+            windowOpen={(() => {
+              const h = hoursSince(video.atIso);
+              return h !== null && h < REACH_GUARANTEE_WINDOW_HOURS;
+            })()}
           />
         </div>
       ) : (

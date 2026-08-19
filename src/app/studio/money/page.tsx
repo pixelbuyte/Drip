@@ -292,7 +292,11 @@ type MoneyData = {
   monthOrderCount: number;
   lastMonthNetCents: number;
   tier: VolumeTierProgress | null;
-  recent: OrderEarnings[];
+  // hasLabel travels beside the earnings rather than inside them: it is a
+  // display fact about the ORDER ROW (label_url set), not part of the fee
+  // arithmetic OrderEarnings models — and dropping it here is exactly how
+  // the ledger's label line came to say "Not bought yet" on labeled orders.
+  recent: { earnings: OrderEarnings; hasLabel: boolean }[];
   reversals: ReversalBreakdown[];
   payout: PayoutStatus;
 };
@@ -341,7 +345,7 @@ async function loadMoney(): Promise<MoneyData | null> {
   ]);
 
   displayName = profile?.display_name?.trim() || 'there';
-  const founding = await loadFounding(supabase, profile?.created_at ?? null);
+  const founding = await loadFounding(admin, profile?.created_at ?? null);
 
   // ── Orders ──────────────────────────────────────────────────────────────
   // Month boundaries are UTC, and `monthLabel()` reads the same instant, so
@@ -452,7 +456,10 @@ async function loadMoney(): Promise<MoneyData | null> {
     }
   }
 
-  const recent = recentRows.map(toEarnings);
+  const recent = recentRows.map((row) => ({
+    earnings: toEarnings(row),
+    hasLabel: row.hasLabel,
+  }));
   const reversals = reversalRows.map((row) => {
     const order = toEarnings(row);
     return summarizeReversal({
@@ -508,12 +515,16 @@ async function loadMoney(): Promise<MoneyData | null> {
  * charged is a separate question, answered per row by `buildOrderEarnings`.
  */
 async function loadFounding(
-  supabase: SupabaseClient,
+  // Service-role client (or null): profiles' public-read policy is scoped TO
+  // anon and authenticated only matches self-read, so a caller-scoped count
+  // sees one row and every seller becomes "Founding seller #1". Only the
+  // aggregate count leaves this query.
+  admin: ReturnType<typeof adminOrNull>,
   createdAt: string | null
 ): Promise<FoundingSellerStatus | null> {
-  if (!createdAt) return null;
+  if (!createdAt || !admin) return null;
   try {
-    const { count: n, error } = await supabase
+    const { count: n, error } = await admin
       .from('profiles')
       .select('id', { count: 'exact', head: true })
       .lte('created_at', createdAt);
@@ -1167,8 +1178,8 @@ export default async function StudioMoneyPage() {
             broken out to the cent.
           </p>
           <div className="mt-3 grid grid-cols-1 gap-3">
-            {data.recent.map((order) => (
-              <OrderLedger key={order.orderRef} order={order} />
+            {data.recent.map(({ earnings, hasLabel }) => (
+              <OrderLedger key={earnings.orderRef} order={earnings} hasLabel={hasLabel} />
             ))}
           </div>
         </section>

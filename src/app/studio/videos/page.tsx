@@ -193,7 +193,16 @@ async function loadVideos(): Promise<VideoCard[] | null> {
       impressions: Number(stats?.impressions_all ?? 0),
       taps: Number(stats?.product_taps_all ?? 0),
       sold: Number(stats?.purchases_all ?? 0),
-      budgetDelivered: Number(stats?.exploration_impressions ?? 0),
+      // Same fallback the pulse page uses, for the same reason:
+      // exploration_impressions only counts lane='fresh' impressions, and
+      // with ranking dark (100% of traffic on the chrono feed) it can never
+      // move — a raw read renders "0/500 delivering" directly beside a
+      // climbing Seen count. Real impressions ARE the delivery until the
+      // ranked path serves traffic; take whichever counter is further along.
+      budgetDelivered: Math.max(
+        Number(stats?.exploration_impressions ?? 0),
+        Math.min(Number(stats?.impressions_all ?? 0), REACH_GUARANTEE_IMPRESSIONS)
+      ),
       budgetTotal: REACH_GUARANTEE_IMPRESSIONS,
       soldOut: soldOut.has(video.id),
     };
@@ -300,7 +309,16 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 function VideoRowCard({ video }: { video: VideoCard }) {
   const signal = signalFor(video);
   const progress = progressPct(video.budgetDelivered, video.budgetTotal);
-  const showBar = video.isLive && video.budgetDelivered < video.budgetTotal;
+  // Gated on the 48h window like signalFor's "delivering" verdict already
+  // is: without the gate, every live video short of 500 impressions carried
+  // a first-day-reach bar FOREVER — a permanently unfinished promise on
+  // videos whose first day ended weeks ago.
+  const barHours = hoursSince(video.atIso);
+  const showBar =
+    video.isLive &&
+    video.budgetDelivered < video.budgetTotal &&
+    barHours !== null &&
+    barHours < REACH_GUARANTEE_WINDOW_HOURS;
 
   return (
     <li>
