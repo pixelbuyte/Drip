@@ -71,7 +71,12 @@ describe('recordFeedEventsForAffinity', () => {
     expect(upserted).not.toBeNull();
     const row = upserted as unknown as { category_affinity: Record<string, number>; anon_id: string };
     expect(row.anon_id).toBe('a1');
-    expect(row.category_affinity.c1).toBeGreaterThan(0);
+    // RAW persistence regression guard: a purchase carries EVENT_WEIGHTS'
+    // +10, so the stored value must be on the event scale (~10), not a
+    // normalised share (which can never exceed 1.0). Persisting the
+    // normalised map was a real bug: one +10 event swamped a viewer's whole
+    // <=1.0 stored history on the next pass.
+    expect(row.category_affinity.c1).toBeGreaterThan(5);
   });
 
   it('maps a skip under 2s to fast_skip (negative)', async () => {
