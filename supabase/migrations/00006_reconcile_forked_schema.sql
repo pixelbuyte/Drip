@@ -427,7 +427,18 @@ GRANT EXECUTE ON FUNCTION public.seller_charges_enabled(uuid)
 
 -- Scoping the public policy TO anon also stops one signed-in seller reading
 -- every other seller's row: authenticated now only matches profiles_self_read.
+--
+-- BOTH names are dropped. Repo 00001 called this policy
+-- "profiles_public_read_handle", but a pg_policies dump taken directly from
+-- production (2026-08-19, read-only) shows the live policy is named
+-- "profiles_public_read" — production's initial_schema was not byte-identical
+-- to repo 00001. Policies are OR'd, so dropping only the repo name would have
+-- left the wide-open production policy standing through the whole chain and
+-- silently defeated the anon scoping below. This is exactly the "unknown
+-- leftover policy WIDENS access" hazard this file's header warns about, now
+-- with its concrete name.
 DROP POLICY IF EXISTS "profiles_public_read_handle" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_public_read" ON public.profiles;
 CREATE POLICY "profiles_public_read_handle" ON public.profiles
   FOR SELECT TO anon USING (true);
 
@@ -488,6 +499,15 @@ ALTER TABLE public.seller_payments ENABLE ROW LEVEL SECURITY;
 
 -- Payout destination and a physical home address. No browser role, ever.
 REVOKE ALL ON public.seller_payments FROM anon, authenticated;
+
+-- Production also carries three self-access policies on this table
+-- (pg_policies dump, 2026-08-19): self_read / self_update / self_insert,
+-- all auth.uid() = seller_id. With every browser-role grant revoked above
+-- they are inert — but a policy that would re-open a PII table the moment
+-- someone hands back a GRANT is a tripwire, not a safeguard. Dropped.
+DROP POLICY IF EXISTS "seller_payments_self_read" ON public.seller_payments;
+DROP POLICY IF EXISTS "seller_payments_self_update" ON public.seller_payments;
+DROP POLICY IF EXISTS "seller_payments_self_insert" ON public.seller_payments;
 
 -- 00006 put this UNIQUE on profiles.stripe_account_id. The column moved, so
 -- the constraint moves with it. account.updated resolves the seller by
