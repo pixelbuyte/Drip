@@ -64,9 +64,69 @@ RE-TAKE AT T-0: run the same queries (they are embedded in the JSON's
 provenance notes) immediately before applying, so the snapshot cannot be
 stale. Any diff vs the committed snapshot = stop and investigate.
 
-## 3. Down-migration — <!-- SPLICE:DOWN -->
+## 3. Down-migration — VERIFIED ON THE REPLICA
 
-## 4. Row-count and FK-integrity diff — <!-- SPLICE:DIFF -->
+`scripts/down/full_chain_down.sql` — one explicit transaction, deliberately
+outside `supabase/migrations/` so no version-ordered tool can ever
+auto-apply it. It takes a post-chain database back to the pre-chain
+production state: reconstructs `public.drops` (00001's exact DDL plus
+production's `video_url`/`image_url` columns, original constraints, index,
+trigger, and policy names) and its row by precisely inverting 00007's
+backfill — including flipping `status` back `processing` → `active`
+(inverting the reconcile's section-4 correction) and rebuilding the
+`dimensions` jsonb byte-identically; restores `orders` to its 00001 shape
+(`drop_id` NOT NULL FK re-derived from `video_id`, 13 chain columns
+dropped, the 4-value status check, original policies and grants); restores
+00001's BOOLEAN `decrement_inventory` verbatim (function-definition md5 and
+ACL match the pre-state); restores production's REAL policy names
+(`profiles_public_read`, the three `seller_payments` self policies); drops
+all 23 chain tables children-first with no CASCADE, 22 chain functions, 6
+enum types; and unschedules the cron jobs behind the same pg_cron guard the
+chain uses.
+
+Verified twice by execution on a fresh replica rebuild (production policy
+names modeled, no views — matching primary evidence): chain 00006→00016 in
+ONE `psql --single-transaction`, exit 0, **251–310 ms wall-clock**; down
+migration exit 0, clean on its first full cycle. Post-down state diffed
+EXHAUSTIVELY against pre-chain (tables, columns+types+defaults, all
+constraints, policies incl. roles/qual/with_check, function definitions and
+ACLs, triggers, indexes, ACLs, enums, sequences, views, extensions, and
+full row data minus `updated_at`): **one** residual difference, justified —
+`orders.drop_id` sits at column ordinal 29 instead of 2, because Postgres
+appends re-added columns and cannot reorder without a rewrite; name, type,
+NOT NULL, FK, and index are identical, and nothing consumes column order.
+
+Accepted irreversibilities, documented in the file header — all vacuous for
+current production data (0 orders, 1 demo drop): COALESCEd shipping
+defaults, `video_url` discarded by the chain itself, `mux_asset_id` nulled
+by 00007's own backfill, the 'removed'-status mapping, and hypothetical
+feed-era orders having no `drop_id` to restore.
+
+## 4. Row-count and FK-integrity diff — CLEAN
+
+Row counts, replica: pre-chain → post-chain → post-down. Every delta
+expected and explained; full table below (chain-created tables show their
+seeds).
+
+| table | pre | post-chain | post-down | why |
+|---|---|---|---|---|
+| auth.users | 1 | 1 | 1 | untouched |
+| profiles | 1 | 1 | 1 | constraints/policies/grants only; row data identical |
+| drops | 1 | 0 (table dropped) | 1 | backfilled into videos/products, then reconstructed by the down; row identical minus updated_at |
+| orders | 0 | 0 | 0 | columns only |
+| seller_payments | 1 | 1 | 1 | policies dropped, rows untouched |
+| processed_events | 0 | 0 | 0 | untouched |
+| categories | — | 12 (00007 seed) | — | dropped by down |
+| videos / products / shipping_profiles / video_products / seller_trust | — | 1 each (backfill from the drop) | — | consumed by inversion, dropped |
+| feed_weights | — | 2 (control + dark ranked_v2) | — | dropped |
+| rollup_state | — | 1 | — | dropped |
+| category_rate_medians | — | 0 (seed correctly writes nothing on empty stats) | — | dropped |
+| 14 other chain tables (feed_events, feed_slices, viewer_*, follows, video_stats, order_items, waitlist_entries, reports, discount_codes, …) | — | 0 | — | created empty, dropped |
+
+FK integrity, post-chain: mechanical audit over **every** FK constraint in
+the schema (30 constraints, including composite FKs, the viewer_identities
+self-FK, and the three FKs into auth.users), generated LEFT JOIN orphan
+checks with MATCH SIMPLE semantics: **0 orphan rows**.
 
 ## 5. Locks and the maintenance window
 
@@ -143,7 +203,43 @@ the evidence.
   no objects depending on `drops`, so `DROP TABLE public.drops` cannot fail
   on dependencies.
 
-## 8. ranked_v2 five-property audit — <!-- SPLICE:AUDIT -->
+## 8. ranked_v2 five-property audit (Task 0.2) — ALL FIVE PRESENT (verified at both the pure core and the wired path)
+
+| # | Property | Verdict | Core evidence | Wired evidence |
+|---|---|---|---|---|
+| 1 | Stochastic selection, not greedy (P1 deterministic, 2..N softmax T≈0.08) | **PRESENT** | select.ts:636 (P1 no-rng), 175-197 softmax w/ log-sum-exp, T=0.08 (types.ts:42) | ranked-slice.ts:308-314 passes neither temperature nor engagedEvents → resolves to the 0.08 default; per-session seeded rng |
+| 2 | Evidence gating: blend toward 0.5 ∝ min(1, impressions/100) | **PRESENT** | normalize.ts:67-78 evidenceGate, threshold 100 (types.ts:50); order is smooth → 2.5×-median norm → gate; every rate signal in signals.ts enumerated and routed through it | weights.ts:120 hardcodes the threshold (not a feed_weights column — no A/B row can weaken the gate) |
+| 3 | Normalisation reference at 2.5× category median | **PRESENT** | types.ts:100 (2.5), normalize.ts:139-148 (reference = median × multiplier; zero/non-finite → 0.5 neutral, no div-by-zero); empty-table path falls to shipped defaults | weights.ts:121 code-constant; ranked-slice.ts:232→302 medians loaded and threaded |
+| 4 | Affinity cap by iterative water-filling, floor 1/n | **PRESENT** | affinity.ts:324-404: effectiveCap = max(0.45, 1/n), freeze-and-redistribute loop, structural termination + n+2 guard; 2-key {9,1}→{0.5,0.5} verified concretely | events route → recordFeedEventsForAffinity → updateViewerAffinityWithSignals, default cap 0.45, applied to all three maps |
+| 5 | Exploration lane floor 3 AND ceiling 6 per 20-slice | **PRESENT** | types.ts:46-48; select.ts enforces floor by slot reservation (short slice rather than dropped floor) and ceiling at 650-652; ids 4/5 structurally absent from RELAX_ORDER — neither can be relaxed | floor flows from feed_weights.min_fresh_per_slice; the ceiling has NO config column at all — code-constant 6 |
+
+On the user's literal 1-in-3 vs 90-in-20,000 example: the fluke gates to
+~0.51 (held AT neutral) while 90/20,000 scores ~0.09 — the fluke ranks
+higher, and correctly so: 0.45% conversion against a 2% median is a
+WELL-EVIDENCED bad performer that belongs below neutral. The gate's actual
+guarantee — thin evidence can never rise meaningfully above neutral, and a
+well-evidenced good performer (90/2,000 → 0.89) beats the fluke — holds.
+
+Adjacent findings from the audit (reported, per instruction NOT yet fixed):
+1. **REAL BUG, flagged for immediate follow-up — raw vs normalised
+   affinity persistence.** affinity-update.ts:222-232 upserts
+   `result.profile` (the normalised, sum-to-1, capped maps) into
+   viewer_profiles and feeds those same maps back as the next pass's input.
+   affinity.ts:141-150 explicitly documents that the running state must be
+   `result.raw`: feeding normalised maps back is a scale mismatch — a
+   single +10 purchase event dwarfs an entire ≤1.0 stored history, and
+   decay-then-renormalise becomes a near-no-op. Passes unit tests because
+   each single pass is correct; the damage only compounds across passes.
+   Same family as the frozen-decay-clock bug fixed earlier: corrupts stored
+   affinity today, user-visible once ranked_v2 takes traffic.
+2. Spec-6.6 opt-ins are dead in production: adaptiveTemperature/
+   engagedEvents (strangers should get T≈0.12) and the 1-in-20 uniform
+   random slot exist in the core but are never passed by ranked-slice.ts —
+   every viewer gets fixed T=0.08 and zero random slots. Deliberately
+   opt-in by design; wiring them is a rollout-tuning decision, not a bug.
+3. A feed_weights variant could set min_fresh_per_slice above 6, and
+   select() raises the ceiling to match the floor — the only config path
+   that can move the ceiling. Worth a guard or an ops note before tuning.
 
 ## Blockers summary
 
@@ -151,6 +247,6 @@ the evidence.
 |---|------|-------|
 | 1 | PITR confirmed by operator (§1) | **OPEN — operator action** |
 | 2 | T-0 snapshot re-taken clean (§2) | open until apply day |
-| 3 | Down-migration verified on replica (§3) | <!-- SPLICE:B3 --> |
-| 4 | Row-count/FK diff clean (§4) | <!-- SPLICE:B4 --> |
+| 3 | Down-migration verified on replica (§3) | **CLOSED** — verified twice by execution |
+| 4 | Row-count/FK diff clean (§4) | **CLOSED** — 30 FKs, 0 orphans, 1 justified residual |
 | 5 | Window plan accepted (§5–6) | ready for review |
