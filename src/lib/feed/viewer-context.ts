@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { normalizeWithCap } from '@/lib/scoring/affinity';
 import type { ViewerContext, ViewerVideoPurchase } from '@/lib/scoring/candidates';
 import type { PriceBand, ViewerProfile } from '@/lib/scoring/types';
 import { loadViewerBlocks } from './blocks';
@@ -84,10 +85,15 @@ async function loadViewerProfile(db: SupabaseClient, anonId: string): Promise<Vi
   const row = data as ViewerProfileRow | null;
   if (!row) return EMPTY_PROFILE;
 
+  // The stored maps are the RAW running state (event-scale, unbounded — see
+  // affinity-update.ts's persistence comment and affinity.ts's
+  // ViewerAffinityUpdate contract). The ranker's affinity signal consumes
+  // normalised shares, so the normalised view is derived here at read time —
+  // the read-side counterpart of persisting raw on the write side.
   return {
-    categoryAffinity: toAffinityRecord(row.category_affinity),
-    sellerAffinity: toAffinityRecord(row.seller_affinity),
-    hashtagAffinity: toAffinityRecord(row.hashtag_affinity),
+    categoryAffinity: normalizeWithCap(toAffinityRecord(row.category_affinity)),
+    sellerAffinity: normalizeWithCap(toAffinityRecord(row.seller_affinity)),
+    hashtagAffinity: normalizeWithCap(toAffinityRecord(row.hashtag_affinity)),
     priceBand: toPriceBand(row.price_band),
     coldStartComplete: row.cold_start_complete === true,
   };
