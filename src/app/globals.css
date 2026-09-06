@@ -33,11 +33,16 @@
   --color-cobalt:    #2e5cff;   /* back-in-stock / info */
   --color-amber:     #ffb01f;   /* rating stars — ink text on fills */
 
-  /* ── TYPE ── */
+  /* ── TYPE ──
+     TOKENS.md also lists a `hand` face (Caveat 600) for handwritten
+     annotations. It is deliberately absent: the founder's hero art carries its
+     own handwriting baked in, a second script face beside it reads as two
+     different hands, and nothing else on the page annotates. Restore this
+     token (and the font in layout.tsx) the day a surface needs one — do not
+     add the font download back speculatively. */
   --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
   --font-sans:    var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
   --font-mono:    var(--font-hanken), ui-sans-serif, system-ui, sans-serif; /* legacy alias */
-  --font-hand:    var(--font-caveat), "Segoe Print", "Bradley Hand", cursive; /* hero annotations only */
 
   --text-hero: clamp(2.75rem, 7.5vw, 5.25rem);
   --text-hero--line-height: 0.95;

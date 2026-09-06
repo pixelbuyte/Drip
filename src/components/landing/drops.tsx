@@ -1,4 +1,5 @@
-import { Glyph, SCENE, Sticker } from './icons';
+import { Glyph } from './icons';
+import ProductArt from './product-art';
 import { PRODUCTS, type Product } from './products';
 import SaveButton from './save-button';
 
@@ -9,50 +10,58 @@ function pctOff(p: Product): number | null {
 
 /**
  * "Drops selling out this week." A product grid that reads as polished
- * commerce UI: the art is a lit sticker in the object's own pastel scene,
- * one sale badge, the save button, a claimed-progress bar that says WHY
- * it's selling out, then price / old price / savings, the review line, and
- * the shipping note — everything a buyer checks before tapping, in the
- * order they check it.
+ * commerce UI: the art is the real render on its own pastel scene, one sale
+ * badge, the save button, a claimed-progress bar that says WHY it is selling
+ * out, then price / old price / savings, the review line and the shipping
+ * note — everything a buyer checks before tapping, in the order they check it.
  */
 function DropCard({ p, i }: { p: Product; i: number }) {
-  const scene = SCENE[p.sticker];
   const off = pctOff(p);
   return (
     <li data-enter="rise" style={{ '--i': i % 3 } as React.CSSProperties}>
-      <article className="group flex h-full flex-col rounded-[24px] bg-card p-2.5 shadow-card transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-card-hover">
-        <div
-          className="relative aspect-[4/4.4] w-full overflow-hidden rounded-[18px]"
-          style={{ background: `linear-gradient(140deg, ${scene.from}, ${scene.to})` }}
-        >
-          <span
-            className="pointer-events-none absolute inset-0"
-            style={{ background: 'radial-gradient(72% 58% at 28% 20%, rgba(255,255,255,0.58), transparent 62%)' }}
+      <article className="group flex h-full flex-col rounded-[24px] bg-card p-2.5 shadow-card transition-[transform,box-shadow] duration-300 ease-out hover:-translate-y-1.5 hover:shadow-card-hover">
+        <div className="relative">
+          {/* the claimed pill is docked over the bottom of the tile, so the
+              object gets a reserved band above it — deeper on mobile, where
+              the pill takes a much bigger share of a small tile */}
+          {/* the object is decorative here — the <h3> below already names it,
+              so an alt would make a screen reader say it twice */}
+          <ProductArt
+            art={p.art}
+            align="end"
+            sizes={`(max-width: 767px) 32vw, ${p.art.render}px`}
+            inset="px-[15%] pb-[30%] pt-[7%] md:pb-[23%] md:pt-[9%]"
+            className="aspect-square w-full rounded-[18px] md:aspect-[4/3.5]"
           />
-          <span className="pointer-events-none absolute inset-x-8 bottom-2 h-10 rounded-full blur-xl" style={{ background: scene.glow }} />
-          <div className="absolute inset-0 grid place-items-center transition-transform duration-300 ease-out group-hover:scale-[1.05]">
-            <Sticker kind={p.sticker} tilt={p.tilt} className="h-[74%] w-[74%]" title={p.name} />
-          </div>
 
           {off !== null ? (
-            <span className="absolute left-2.5 top-2.5 rounded-full bg-coral px-2.5 py-1 text-[12px] font-extrabold text-ink shadow-[0_4px_10px_-3px_rgba(255,75,46,0.5)]">
+            <span className="absolute left-2.5 top-2.5 z-20 rounded-full bg-coral px-2.5 py-1 text-[12px] font-extrabold tracking-[-0.01em] text-ink shadow-[0_4px_12px_-3px_rgba(255,75,46,0.55)]">
               −{off}%
             </span>
           ) : p.badge === 'new' ? (
-            <span className="absolute left-2.5 top-2.5 rounded-full bg-lime px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-[0.06em] text-ink">
+            <span className="absolute left-2.5 top-2.5 z-20 rounded-full bg-lime px-2.5 py-1 text-[11px] font-extrabold uppercase tracking-[0.06em] text-ink">
               New
             </span>
           ) : null}
 
-          <div className="absolute right-2.5 top-2.5">
+          <div className="absolute right-2.5 top-2.5 z-20">
             <SaveButton label={p.name} />
           </div>
 
           {/* why it's selling out */}
-          <div className="absolute inset-x-2.5 bottom-2.5 rounded-full bg-white/85 px-3 py-1.5 backdrop-blur-sm">
-            <div className="flex items-center justify-between text-[11px] font-bold text-ink">
-              <span data-num>{p.claimed}% claimed</span>
-              {p.left ? <span data-num className="text-sale">Only {p.left} left</span> : <span className="text-muted">Just dropped</span>}
+          <div className="absolute inset-x-2.5 bottom-2.5 z-20 rounded-full bg-white/88 px-3 py-1.5 shadow-[0_2px_8px_-4px_rgba(32,26,23,0.3)] backdrop-blur-sm">
+            <div className="flex items-center justify-between gap-1.5 text-[10.5px] font-bold text-ink md:text-[11px]">
+              <span data-num className="shrink-0 whitespace-nowrap">
+                {p.claimed}%<span className="hidden md:inline"> claimed</span>
+              </span>
+              {p.left ? (
+                <span data-num className="min-w-0 truncate text-sale">
+                  <span className="hidden md:inline">Only </span>
+                  {p.left} left
+                </span>
+              ) : (
+                <span className="min-w-0 truncate text-muted">Just dropped</span>
+              )}
             </div>
             <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-ink/10">
               <div className="h-full rounded-full bg-coral" style={{ width: `${p.claimed}%` }} />
@@ -60,12 +69,12 @@ function DropCard({ p, i }: { p: Product; i: number }) {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col px-2 pb-2 pt-3">
+        <div className="flex flex-1 flex-col px-2 pb-2 pt-3.5">
           <div className="text-[12px] font-semibold text-violet">{p.creator}</div>
-          <h3 className="mt-0.5 line-clamp-2 text-[15px] font-semibold leading-snug tracking-[-0.01em] text-ink">{p.name}</h3>
+          <h3 className="mt-0.5 line-clamp-2 text-[15px] font-semibold leading-snug tracking-[-0.012em] text-ink">{p.name}</h3>
 
-          <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span data-num className="text-[20px] font-extrabold tracking-[-0.02em] text-ink">
+          <div className="mt-2.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span data-num className="font-display text-[22px] font-extrabold tracking-[-0.03em] text-ink">
               ${p.price}
             </span>
             {p.oldPrice && (
@@ -86,7 +95,7 @@ function DropCard({ p, i }: { p: Product; i: number }) {
             <span data-num className="text-muted">({p.reviews} reviews)</span>
           </div>
 
-          <div className="mt-auto flex items-center gap-1.5 pt-2.5 text-[12.5px] font-medium text-muted">
+          <div className="mt-auto flex items-center gap-1.5 pt-3 text-[12.5px] font-medium text-muted">
             <Glyph.Truck size={15} className="text-ink/70" />
             {p.shipping}
           </div>

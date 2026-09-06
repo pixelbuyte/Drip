@@ -105,19 +105,19 @@ export default function Nav() {
         <div className="mx-auto flex h-[68px] max-w-[1240px] items-center gap-6 px-5 md:px-6">
           <Wordmark className="text-[24px]" />
 
-          <nav className="ml-auto hidden items-center gap-1 md:flex" aria-label="Primary">
+          <nav className="mx-auto hidden items-center gap-1 md:flex" aria-label="Primary">
             {LINKS.map((l) => (
               <a
                 key={l.href}
                 href={l.href}
-                className="rounded-full px-3.5 py-2 text-[14.5px] font-semibold text-ink/80 transition-colors duration-150 hover:bg-ink/[0.05] hover:text-ink"
+                className="rounded-full px-3.5 py-2 text-[14.5px] font-semibold text-ink/75 transition-[background-color,color] duration-200 hover:bg-ink/[0.06] hover:text-ink"
               >
                 {l.label}
               </a>
             ))}
           </nav>
 
-          <div className="ml-auto hidden items-center gap-2 md:flex">
+          <div className="hidden items-center gap-2 md:flex">
             <a
               href="/auth/login"
               className="rounded-full px-3.5 py-2 text-[14.5px] font-semibold text-ink/80 transition-colors duration-150 hover:text-ink"
@@ -126,7 +126,7 @@ export default function Nav() {
             </a>
             <a
               href="/auth/signup"
-              className="rounded-full bg-coral px-5 py-2.5 text-[14.5px] font-bold text-ink shadow-cta transition-transform duration-[350ms] ease-spring hover:brightness-105 active:scale-[0.96]"
+              className="rounded-full bg-coral px-5 py-2.5 text-[14.5px] font-bold text-ink shadow-cta transition-[transform,filter] duration-[350ms] ease-spring hover:brightness-105 active:scale-[0.96]"
             >
               Get the app
             </a>

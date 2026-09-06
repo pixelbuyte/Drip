@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
-import { Bricolage_Grotesque, Caveat, Hanken_Grotesk } from 'next/font/google';
+import { Bricolage_Grotesque, Hanken_Grotesk } from 'next/font/google';
 import './globals.css';
 
-// Bricolage at high optical sizes for headlines; Hanken for every card title,
-// price, button and chip; Caveat only for the hero's handwritten annotation.
-// All three variable.
+// Bricolage at high optical sizes for headlines; Hanken for every card
+// title, price, button and chip. Both variable.
 const display = Bricolage_Grotesque({
   variable: '--font-bricolage',
   subsets: ['latin'],
@@ -14,12 +13,6 @@ const display = Bricolage_Grotesque({
 
 const sans = Hanken_Grotesk({
   variable: '--font-hanken',
-  subsets: ['latin'],
-  display: 'swap',
-});
-
-const hand = Caveat({
-  variable: '--font-caveat',
   subsets: ['latin'],
   display: 'swap',
 });
@@ -43,7 +36,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${sans.variable} ${hand.variable} h-full antialiased`}
+      className={`${display.variable} ${sans.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>
