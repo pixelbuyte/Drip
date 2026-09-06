@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-const CHIPS = ['chunky white sneakers', 'lip oil', 'desk setup glow-up', 'gifts under $50', 'airport outfit'];
+const LINKS = [
+  { href: '#categories', label: 'Categories' },
+  { href: '#creators', label: 'Creators' },
+  { href: '#drops', label: 'Drops' },
+  { href: '/feed/demo', label: 'How it works' },
+];
 
 function Magnifier() {
   return (
@@ -14,6 +19,7 @@ function Magnifier() {
   );
 }
 
+/** Used by /search (and available to any surface that wants a search box). */
 export function SearchField({
   className = '',
   initialValue = '',
@@ -54,31 +60,19 @@ export function SearchField({
   );
 }
 
-export function SearchChips({ className = '' }: { className?: string }) {
-  const router = useRouter();
+function Wordmark({ className = '' }: { className?: string }) {
   return (
-    <div className={`rail md:flex-wrap md:overflow-visible ${className}`}>
-      {CHIPS.map((c) => (
-        <button
-          key={c}
-          type="button"
-          onClick={() => router.push(`/search?q=${encodeURIComponent(c)}`)}
-          className="whitespace-nowrap rounded-full border border-hairline-strong bg-card px-3.5 py-1.5 text-[13px] font-semibold text-ink transition-colors duration-150 hover:border-coral/30 hover:bg-coral/10 hover:text-coral-deep"
-        >
-          {c}
-        </button>
-      ))}
-    </div>
+    <a href="/" className={`shrink-0 font-display font-extrabold tracking-[-0.04em] text-ink ${className}`}>
+      Drip<span className="text-coral">.</span>
+    </a>
   );
 }
 
-const LINKS = [
-  { href: '#feed', label: 'Feed' },
-  { href: '#categories', label: 'Categories' },
-  { href: '#creators', label: 'Creators' },
-  { href: '#lists', label: 'My List' },
-];
-
+/**
+ * Sticky, glass-on-scroll. Transparent over the hero so the page's first
+ * screen is the product, not the chrome; once the sentinel scrolls out it
+ * picks up a frosted surface and a hairline shadow.
+ */
 export default function Nav() {
   const [stuck, setStuck] = useState(false);
   const [open, setOpen] = useState(false);
@@ -101,49 +95,48 @@ export default function Nav() {
 
   return (
     <>
-      <div ref={sentinel} className="absolute top-0 h-8 w-full" aria-hidden />
+      <div ref={sentinel} className="absolute top-0 h-6 w-full" aria-hidden />
 
       <header
-        className={`fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow] duration-300 ${
-          stuck ? 'bg-card/90 shadow-nav backdrop-blur-md' : 'bg-transparent'
+        className={`fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow,backdrop-filter] duration-300 ${
+          stuck ? 'bg-cream/85 shadow-nav backdrop-blur-xl' : 'bg-transparent'
         }`}
       >
-        <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-4 px-5 md:px-6">
-          <a href="/" className="shrink-0 font-display text-[22px] font-extrabold tracking-[-0.03em] text-ink">
-            Drip<span className="text-coral">.</span>
-          </a>
+        <div className="mx-auto flex h-[68px] max-w-[1240px] items-center gap-6 px-5 md:px-6">
+          <Wordmark className="text-[24px]" />
 
-          <SearchField className="mx-2 hidden max-w-[560px] flex-1 md:flex" />
-
-          <nav className="ml-auto hidden items-center gap-1 md:flex">
-            {LINKS.slice(0, 3).map((l) => (
+          <nav className="ml-auto hidden items-center gap-1 md:flex" aria-label="Primary">
+            {LINKS.map((l) => (
               <a
                 key={l.href}
                 href={l.href}
-                className="rounded-full px-3 py-2 text-[15px] font-semibold text-ink transition-colors duration-150 hover:text-coral-deep"
+                className="rounded-full px-3.5 py-2 text-[14.5px] font-semibold text-ink/80 transition-colors duration-150 hover:bg-ink/[0.05] hover:text-ink"
               >
                 {l.label}
               </a>
             ))}
+          </nav>
+
+          <div className="ml-auto hidden items-center gap-2 md:flex">
             <a
               href="/auth/login"
-              className="rounded-full px-3 py-2 text-[15px] font-semibold text-ink transition-colors duration-150 hover:text-coral-deep"
+              className="rounded-full px-3.5 py-2 text-[14.5px] font-semibold text-ink/80 transition-colors duration-150 hover:text-ink"
             >
               Sign in
             </a>
             <a
               href="/auth/signup"
-              className="ml-2 rounded-full bg-coral px-5 py-2.5 text-[15px] font-bold text-ink shadow-cta transition-transform duration-150 active:scale-[0.97]"
+              className="rounded-full bg-coral px-5 py-2.5 text-[14.5px] font-bold text-ink shadow-cta transition-transform duration-[350ms] ease-spring hover:brightness-105 active:scale-[0.96]"
             >
-              Start Shopping
+              Get the app
             </a>
-          </nav>
+          </div>
 
           <button
             onClick={() => setOpen((v) => !v)}
             aria-label={open ? 'Close menu' : 'Open menu'}
             aria-expanded={open}
-            className="relative ml-auto flex h-11 w-11 items-center justify-center md:hidden"
+            className="relative ml-auto flex h-11 w-11 items-center justify-center rounded-full md:hidden"
           >
             <span className={`absolute h-[2px] w-5 rounded bg-ink transition-transform duration-300 ${open ? 'rotate-45' : '-translate-y-[4px]'}`} />
             <span className={`absolute h-[2px] w-5 rounded bg-ink transition-transform duration-300 ${open ? '-rotate-45' : 'translate-y-[4px]'}`} />
@@ -179,7 +172,7 @@ export default function Nav() {
             }`}
             style={{ transitionDelay: '350ms' }}
           >
-            Start Shopping
+            Get the app
           </a>
         </div>
       </div>

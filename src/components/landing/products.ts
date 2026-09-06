@@ -1,79 +1,130 @@
-// The demo catalog. Every product is fictional; prices are chosen to feel
-// real. Activity numbers (saves, bought-today) appear ONLY inside these
-// depicted app-UI cards, never as claims about the platform.
+import type { StickerKind } from './icons';
 
-export type Category =
-  | 'sneakers' | 'fashion' | 'beauty' | 'gaming'
-  | 'tech' | 'home' | 'fitness' | 'gifts';
+// The demo catalog behind the landing page. Every product, creator and
+// number here is fictional and appears only inside depicted app UI — never
+// as a claim about the platform. Prices are chosen to feel real.
 
 export type Product = {
   id: string;
   name: string;
-  price: number;          // dollars
-  wasPrice?: number;      // struck-through sale price
+  price: number; // dollars
+  oldPrice?: number;
   rating: number;
-  reviews: string;        // display string, e.g. "2.1k"
-  glyph: string;          // emoji product stand-in
-  category: Category;
-  tilt: number;           // glyph rotation, degrees
-  badge?: 'new' | 'drop' | 'restock';
-  creator?: string;       // "@handle" attribution
-  sponsored?: boolean;
-};
-
-// 135° pastel duotones per category — all in the light band so ink text
-// stays readable on top; plus the hue-tinted contact shadow for the glyph.
-export const SCENES: Record<Category, { from: string; to: string; shadow: string }> = {
-  sneakers: { from: '#ffe3d8', to: '#ffc9b5', shadow: 'rgba(255,75,46,0.35)' },
-  fashion:  { from: '#ffdcec', to: '#ffc2dd', shadow: 'rgba(255,46,147,0.32)' },
-  beauty:   { from: '#f3e4ff', to: '#e3ccff', shadow: 'rgba(109,74,255,0.28)' },
-  gaming:   { from: '#e4dcff', to: '#cdc2ff', shadow: 'rgba(109,74,255,0.32)' },
-  tech:     { from: '#dde7ff', to: '#c4d5ff', shadow: 'rgba(46,92,255,0.3)' },
-  home:     { from: '#ffedd2', to: '#ffddb0', shadow: 'rgba(255,176,31,0.4)' },
-  fitness:  { from: '#e7f5d8', to: '#d2ecb9', shadow: 'rgba(122,180,60,0.35)' },
-  gifts:    { from: '#ffe0e8', to: '#ffd9c4', shadow: 'rgba(255,75,46,0.3)' },
+  reviews: string; // display string
+  sticker: StickerKind;
+  tilt: number;
+  creator: string; // "@handle"
+  shipping: string;
+  /** share of the drop already claimed, 0-100 */
+  claimed: number;
+  left?: number;
+  badge?: 'new' | 'restock';
 };
 
 export const PRODUCTS: Product[] = [
-  { id: 'ace',      name: 'Suncourt Ace Low — Cream/Coral',   price: 118, rating: 4.9, reviews: '3.4k', glyph: '👟', category: 'sneakers', tilt: -8, creator: '@maya.finds', sponsored: true },
-  { id: 'fleet',    name: 'Fleetfoot Featherlite — Sorbet',    price: 96,  rating: 4.7, reviews: '1.8k', glyph: '👟', category: 'sneakers', tilt: 6 },
-  { id: 'glaze',    name: 'Glaze Lip Oil — Guava',             price: 22,  rating: 4.8, reviews: '5.2k', glyph: '💄', category: 'beauty',   tilt: -5, badge: 'new' },
-  { id: 'dewpoint', name: 'Dewpoint Skin Tint SPF 30',         price: 34,  rating: 4.6, reviews: '2.9k', glyph: '🧴', category: 'beauty',   tilt: 7 },
-  { id: 'pebble',   name: 'Pebble Buds Mini — Matte Clay',     price: 59,  wasPrice: 79, rating: 4.8, reviews: '4.1k', glyph: '🎧', category: 'tech', tilt: -6 },
-  { id: 'loop',     name: 'Loop Micro Speaker — Cherry',       price: 45,  rating: 4.5, reviews: '980',  glyph: '🔊', category: 'tech',     tilt: 8 },
-  { id: 'kindling', name: 'Kindling Ceramic Pour-Over Set',    price: 68,  rating: 4.9, reviews: '1.2k', glyph: '☕', category: 'home',     tilt: -4, creator: '@sundaysoph' },
-  { id: 'candle',   name: 'Golden Hour Candle — Amber No. 3',  price: 28,  rating: 4.7, reviews: '3.7k', glyph: '🕯️', category: 'home',    tilt: 5 },
-  { id: 'gripwell', name: 'Gripwell Studio Mat — Sage',        price: 48,  rating: 4.8, reviews: '2.3k', glyph: '🧘', category: 'fitness',  tilt: -7 },
-  { id: 'crescent', name: 'Crescent Crossbody — Butter',       price: 72,  rating: 4.9, reviews: '1.6k', glyph: '👜', category: 'gifts',    tilt: 6, badge: 'restock' },
-  { id: 'halo',     name: 'Halo Desk Lamp — Tangerine',        price: 54,  rating: 4.6, reviews: '740',  glyph: '🛋️', category: 'home',    tilt: -5, creator: '@theo.builds' },
-  { id: 'pixelpad', name: 'PixelPad Pro Controller',           price: 64,  rating: 4.7, reviews: '1.1k', glyph: '🎮', category: 'gaming',   tilt: 7 },
+  { id: 'ace',      name: 'Suncourt Ace Low — Cream/Coral',  price: 118, oldPrice: 148, rating: 4.9, reviews: '3.4k', sticker: 'sneaker',  tilt: -8, creator: '@maya.finds',  shipping: 'Free 2-day shipping', claimed: 83, left: 12 },
+  { id: 'pebble',   name: 'Pebble Buds Mini — Matte Clay',   price: 59,  oldPrice: 79,  rating: 4.8, reviews: '4.1k', sticker: 'earbuds',  tilt: -6, creator: '@theo.builds', shipping: 'Free shipping',       claimed: 91, left: 6 },
+  { id: 'glaze',    name: 'Glaze Lip Oil — Guava',           price: 22,  oldPrice: 28,  rating: 4.8, reviews: '5.2k', sticker: 'lipoil',   tilt: 7,  creator: '@maya.finds',  shipping: 'Ships tomorrow',      claimed: 64, badge: 'new' },
+  { id: 'halo',     name: 'Halo Lounge Chair — Mustard',     price: 249, oldPrice: 320, rating: 4.7, reviews: '740',  sticker: 'armchair', tilt: 4,  creator: '@sundaysoph',  shipping: 'Free delivery',       claimed: 72, left: 9 },
+  { id: 'kindling', name: 'Kindling Ceramic Mug — Set of 2', price: 38,  oldPrice: 48,  rating: 4.9, reviews: '1.2k', sticker: 'mug',      tilt: -5, creator: '@sundaysoph',  shipping: 'Free 2-day shipping', claimed: 88, left: 4 },
+  { id: 'monstera', name: 'Little Monstera — 6" Terracotta', price: 34,  oldPrice: 42,  rating: 4.8, reviews: '2.3k', sticker: 'plant',    tilt: 5,  creator: '@rootedrae',   shipping: 'Ships in 2 days',     claimed: 57, badge: 'new' },
 ];
 
 export const byId = (id: string) => PRODUCTS.find((p) => p.id === id)!;
 
-export const CREATORS = [
+export type CategoryCard = {
+  name: string;
+  sticker: StickerKind;
+  drops: string;
+  tilt: number;
+  isNew?: boolean;
+};
+
+export const CATEGORIES: CategoryCard[] = [
+  { name: 'Electronics', sticker: 'earbuds',  drops: '1,240 drops', tilt: -6 },
+  { name: 'Fashion',     sticker: 'sneaker',  drops: '2,860 drops', tilt: -8 },
+  { name: 'Beauty',      sticker: 'lipoil',   drops: '1,930 drops', tilt: 7 },
+  { name: 'Home',        sticker: 'armchair', drops: '980 drops',   tilt: 4 },
+  { name: 'Kitchen',     sticker: 'mug',      drops: '640 drops',   tilt: -5, isNew: true },
+  { name: 'Plants',      sticker: 'plant',    drops: '410 drops',   tilt: 5,  isNew: true },
+];
+
+export type Creator = {
+  handle: string;
+  name: string;
+  initials: string;
+  niche: string;
+  tags: string[];
+  blurb: string;
+  followers: string;
+  drops: string;
+  cta: string;
+  /** avatar duotone + accent */
+  from: string;
+  to: string;
+  accent: 'violet' | 'pink' | 'cobalt' | 'coral';
+  picks: string[];
+};
+
+export const CREATORS: Creator[] = [
   {
     handle: '@maya.finds',
-    name: 'Maya',
-    initials: 'MF',
-    bio: 'Finds under $60, five days a week.',
-    quote: 'If it’s on my page, it’s already in my cart.',
-    picks: ['ace', 'glaze', 'crescent'],
+    name: 'Maya Okafor',
+    initials: 'MO',
+    niche: 'Fashion · Under $60',
+    tags: ['Sneakers', 'Everyday fits'],
+    blurb: 'Five finds a week, all under sixty. If it’s on her feed, it’s already in her cart.',
+    followers: '128k',
+    drops: '342',
+    cta: 'Shop her feed',
+    from: '#ff8f74',
+    to: '#ff2e93',
+    accent: 'pink',
+    picks: ['ace', 'glaze', 'pebble'],
   },
   {
     handle: '@theo.builds',
-    name: 'Theo',
-    initials: 'TB',
-    bio: 'Desks, tech, and things that earn their counter space.',
-    quote: 'Buy it once, love it daily.',
-    picks: ['halo', 'pebble', 'loop'],
+    name: 'Theo Lindqvist',
+    initials: 'TL',
+    niche: 'Tech · Desk setups',
+    tags: ['Audio', 'Workspace'],
+    blurb: 'Buys it, lives with it for 30 days, then tells you whether it earned the counter space.',
+    followers: '96k',
+    drops: '210',
+    cta: 'Shop his feed',
+    from: '#6f92ff',
+    to: '#6d4aff',
+    accent: 'violet',
+    picks: ['pebble', 'halo', 'kindling'],
   },
   {
     handle: '@sundaysoph',
-    name: 'Sofia',
-    initials: 'SS',
-    bio: 'Cozy home, slow Sundays, zero clutter.',
-    quote: 'I only post what survives the 30-day test.',
-    picks: ['kindling', 'candle', 'gripwell'],
+    name: 'Sophie Marchetti',
+    initials: 'SM',
+    niche: 'Home · Slow living',
+    tags: ['Kitchen', 'Cozy corners'],
+    blurb: 'Warm homes, zero clutter. Every drop passes a real Sunday before it passes to you.',
+    followers: '204k',
+    drops: '518',
+    cta: 'Shop her feed',
+    from: '#ffd67a',
+    to: '#f0930a',
+    accent: 'coral',
+    picks: ['kindling', 'halo', 'monstera'],
+  },
+  {
+    handle: '@rootedrae',
+    name: 'Rae Nakamura',
+    initials: 'RN',
+    niche: 'Plants · Small spaces',
+    tags: ['Low light', 'Beginner-proof'],
+    blurb: 'Grows it on a north-facing sill first. If it survives Rae’s apartment, it survives yours.',
+    followers: '71k',
+    drops: '156',
+    cta: 'Shop their feed',
+    from: '#b5e86a',
+    to: '#2e5cff',
+    accent: 'cobalt',
+    picks: ['monstera', 'kindling', 'glaze'],
   },
 ];

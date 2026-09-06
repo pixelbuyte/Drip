@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
-import { Bricolage_Grotesque, Hanken_Grotesk } from 'next/font/google';
+import { Bricolage_Grotesque, Caveat, Hanken_Grotesk } from 'next/font/google';
 import './globals.css';
 
 // Bricolage at high optical sizes for headlines; Hanken for every card title,
-// price, button and chip. Both variable.
+// price, button and chip; Caveat only for the hero's handwritten annotation.
+// All three variable.
 const display = Bricolage_Grotesque({
   variable: '--font-bricolage',
   subsets: ['latin'],
@@ -17,13 +18,19 @@ const sans = Hanken_Grotesk({
   display: 'swap',
 });
 
+const hand = Caveat({
+  variable: '--font-caveat',
+  subsets: ['latin'],
+  display: 'swap',
+});
+
 export const metadata: Metadata = {
-  title: 'Drip — your new favorite way to shop',
+  title: 'Drip — See it. Want it. Buy it.',
   description:
-    'Scroll through things you actually want. Save what is good, watch prices drop, and shop straight from people with taste.',
+    'Video-first shopping. Scroll short videos from creators you trust and buy the featured item straight from the video. Every category, on camera.',
   openGraph: {
-    title: 'Drip — your new favorite way to shop',
-    description: 'The feed is the store. Scroll, save, shop.',
+    title: 'Drip — See it. Want it. Buy it.',
+    description: 'Shop what creators love. Every category, on camera.',
     type: 'website',
   },
 };
@@ -36,7 +43,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${display.variable} ${sans.variable} h-full antialiased`}
+      className={`${display.variable} ${sans.variable} ${hand.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>
     </html>

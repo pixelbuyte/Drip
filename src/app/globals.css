@@ -37,6 +37,7 @@
   --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
   --font-sans:    var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
   --font-mono:    var(--font-hanken), ui-sans-serif, system-ui, sans-serif; /* legacy alias */
+  --font-hand:    var(--font-caveat), "Segoe Print", "Bradley Hand", cursive; /* hero annotations only */
 
   --text-hero: clamp(2.75rem, 7.5vw, 5.25rem);
   --text-hero--line-height: 0.95;
