@@ -1,8 +1,8 @@
 {
   "title": "DRIP \u2014 The complete product experience",
-  "frame_count": 39,
-  "board_count": 14,
-  "pdf_pages": 59,
+  "frame_count": 42,
+  "board_count": 15,
+  "pdf_pages": 64,
   "directions": [
     {
       "name": "A \u00b7 Editorial Commerce",
@@ -557,6 +557,49 @@
       "file": "boards/14-component-language.jpg",
       "pdf_page": 59,
       "frames": []
+    },
+    {
+      "number": 15,
+      "title": "The living shelf / final refinement",
+      "file": "boards/15-living-shelf-refinement.png",
+      "width": 1536,
+      "height": 1024,
+      "pdf_page": 60,
+      "frames": [
+        {
+          "number": 40,
+          "name": "The living shelf",
+          "pdf_page": 61,
+          "crop": [
+            48,
+            47,
+            447,
+            977
+          ]
+        },
+        {
+          "number": 41,
+          "name": "Choose your shade",
+          "pdf_page": 62,
+          "crop": [
+            544,
+            47,
+            449,
+            977
+          ]
+        },
+        {
+          "number": 42,
+          "name": "Make it yours",
+          "pdf_page": 63,
+          "crop": [
+            1042,
+            47,
+            449,
+            977
+          ]
+        }
+      ]
     }
   ],
   "notes": "Boards preserve the original 1448 \u00d7 1086 images embedded in the PDF. Crop coordinates present each app frame without rewriting image pixels."

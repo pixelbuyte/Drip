@@ -1,15 +1,23 @@
 # DRIP — complete product design reference
 
-**39 app frames · 14 design boards · 3 visual directions · 59 PDF pages**
+**42 app frames · 15 design boards · 3 visual directions · 64 PDF pages · 9 guided flows**
 
-The final design combines premium editorial imagery, tactile creator commerce and contextual product sheets. This is the static visual and behavioral reference for implementation.
+The final design combines premium editorial imagery, tactile creator commerce and contextual product sheets. This is the visual and behavioral reference for implementation, with an interactive screen inspector and guided state review.
 
-Open [index.html](index.html) locally after downloading the folder to browse individual frames, switch to complete boards and search for a screen. GitHub displays the HTML source; the linked JPEG boards can be viewed directly on GitHub. The accompanying **Drip-Product-Design.pdf** is supplied in the conversation with each app frame on its own page.
+Open [index.html](index.html) locally after downloading the folder to browse individual frames, search, inspect at full size, and step through nine guided flows. For HTTP frame export and a local preview, run `npm run dev` inside this folder. GitHub displays the HTML source; the linked JPEG boards can be viewed directly on GitHub. The accompanying **Drip-Product-Design-v2.pdf** is supplied in the conversation with each app frame on its own page.
 
 - [Product, interaction and motion specification](SPECIFICATION.md)
 - [Exact design tokens and contrast checks](tokens.json)
 - [Frame and board manifest](manifest.json)
 - [Component language: five product cards and three navigation studies](boards/14-component-language.jpg)
+
+## Version 2 refinement
+
+The `astra-drip` branch retains the original 39 frames and adds frames 40-42: The living shelf, Choose your shade, and Make it yours. Prefer these new frames for the primary feed-to-checkout path. The full-screen inspector includes exact behavior notes, keyboard navigation, comment detent links, and single-frame PNG export.
+
+- [New refinement board](boards/15-living-shelf-refinement.png)
+- [Implementation review guide and integration gaps](REVIEW-GUIDE.md)
+- [Gallery QA](design-qa.md)
 
 ## Full screen index
 
@@ -55,6 +63,10 @@ Open [index.html](index.html) locally after downloading the folder to browse ind
 | 38 | Follow and mini-profile | [13](boards/13-like-follow-scrub.jpg) | 57 |
 | 39 | Product scrub | [13](boards/13-like-follow-scrub.jpg) | 58 |
 
+| 40 | The living shelf | [15](boards/15-living-shelf-refinement.png) | 61 |
+| 41 | Choose your shade | [15](boards/15-living-shelf-refinement.png) | 62 |
+| 42 | Make it yours | [15](boards/15-living-shelf-refinement.png) | 63 |
+
 ## Starting directions
 
 - [A — Editorial Commerce](directions/a-editorial-commerce.png)
@@ -72,3 +84,7 @@ Only `docs/product-design/` is part of this design change. Production applicatio
 ## Rebuild the reference gallery
 
 Run `python3 docs/product-design/build_gallery.py`. The generator uses Python's standard library and local artwork; no build server or external fonts are required. Frame views use source-image coordinates from the PDF so the underlying image pixels remain intact.
+
+## Rebuild downloadable exports
+
+Run `python3 docs/product-design/build_exports.py` after the gallery build. Requires Pillow and ReportLab. The output contains a 64-page PDF, 42 individual source-resolution PNG frames and a ZIP containing the offline gallery, design assets, specifications and exports. Generated exports are ignored by git; source boards and generators are versioned.

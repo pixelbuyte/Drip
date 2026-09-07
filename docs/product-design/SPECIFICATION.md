@@ -1,6 +1,10 @@
 # DRIP — product experience specification
 
-This is the implementation companion to the 39 frame visual reference set. The boards are static mockups. Gestures, motion, checkout and social persistence described here are contracts for implementation; the images do not execute them. All creators, products, prices, reviews, social counts and orders in the artwork are illustrative.
+This is the implementation companion to the 42 frame visual reference set. The boards are static mockups. Gestures, motion, checkout and social persistence described here are contracts for implementation; the images do not execute them. All creators, products, prices, reviews, social counts and orders in the artwork are illustrative.
+
+## Final refinement and review
+
+Frames 40-42 refine the final feed, product peek and checkout. Prefer these for the primary journey; retain frames 1-39 for alternate layouts and complete state coverage. See [REVIEW-GUIDE.md](REVIEW-GUIDE.md) for exact corrections, interactive gallery scope and production integration gaps.
 
 ## Selected direction
 
