@@ -1,0 +1,563 @@
+{
+  "title": "DRIP \u2014 The complete product experience",
+  "frame_count": 39,
+  "board_count": 14,
+  "pdf_pages": 59,
+  "directions": [
+    {
+      "name": "A \u00b7 Editorial Commerce",
+      "file": "directions/a-editorial-commerce.png"
+    },
+    {
+      "name": "B \u00b7 Playful Creator Commerce",
+      "file": "directions/b-playful-creator-commerce.png"
+    },
+    {
+      "name": "C \u00b7 Future Social Shopping",
+      "file": "directions/c-future-social-shopping.png"
+    }
+  ],
+  "boards": [
+    {
+      "number": 1,
+      "title": "The content-to-commerce journey",
+      "file": "boards/01-feed-product-interactions.jpg",
+      "pdf_page": 7,
+      "frames": [
+        {
+          "number": 1,
+          "name": "For you",
+          "pdf_page": 8,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 2,
+          "name": "Product peek",
+          "pdf_page": 9,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 3,
+          "name": "Shop the frame",
+          "pdf_page": 10,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "title": "Comments that stay with the video",
+      "file": "boards/02-comments.jpg",
+      "pdf_page": 11,
+      "frames": [
+        {
+          "number": 4,
+          "name": "Comments / 25%",
+          "pdf_page": 12,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 5,
+          "name": "Comments / 60%",
+          "pdf_page": 13,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 6,
+          "name": "Comments / 90%",
+          "pdf_page": 14,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "title": "Three shopping compositions",
+      "file": "boards/03-shop.jpg",
+      "pdf_page": 15,
+      "frames": [
+        {
+          "number": 7,
+          "name": "Shop / Daily drop",
+          "pdf_page": 16,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 8,
+          "name": "Shop / The edit",
+          "pdf_page": 17,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 9,
+          "name": "Shop / Creator picks",
+          "pdf_page": 18,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "title": "Discovery and intent",
+      "file": "boards/04-discover-category-search.jpg",
+      "pdf_page": 19,
+      "frames": [
+        {
+          "number": 10,
+          "name": "Discover",
+          "pdf_page": 20,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 11,
+          "name": "Fashion",
+          "pdf_page": 21,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 12,
+          "name": "Search results",
+          "pdf_page": 22,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "title": "The buying decision",
+      "file": "boards/05-product-detail.jpg",
+      "pdf_page": 23,
+      "frames": [
+        {
+          "number": 13,
+          "name": "Product detail",
+          "pdf_page": 24,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 14,
+          "name": "Seen on Drip",
+          "pdf_page": 25,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 15,
+          "name": "Sizes and reviews",
+          "pdf_page": 26,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "title": "People and your corner",
+      "file": "boards/06-creators-following-profile.jpg",
+      "pdf_page": 27,
+      "frames": [
+        {
+          "number": 16,
+          "name": "Creator storefront",
+          "pdf_page": 28,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 17,
+          "name": "Following",
+          "pdf_page": 29,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 18,
+          "name": "Your profile",
+          "pdf_page": 30,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 7,
+      "title": "The shopping essentials",
+      "file": "boards/07-saved-notifications-bag.jpg",
+      "pdf_page": 31,
+      "frames": [
+        {
+          "number": 19,
+          "name": "Saved",
+          "pdf_page": 32,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 20,
+          "name": "Notifications",
+          "pdf_page": 33,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 21,
+          "name": "Shopping bag",
+          "pdf_page": 34,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 8,
+      "title": "A purchase without losing your place",
+      "file": "boards/08-checkout.jpg",
+      "pdf_page": 35,
+      "frames": [
+        {
+          "number": 22,
+          "name": "Quick checkout",
+          "pdf_page": 36,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 23,
+          "name": "Delivery details",
+          "pdf_page": 37,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 24,
+          "name": "It's yours",
+          "pdf_page": 38,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 9,
+      "title": "Different stories, one feed",
+      "file": "boards/09-feed-variations.jpg",
+      "pdf_page": 39,
+      "frames": [
+        {
+          "number": 25,
+          "name": "Compare in the feed",
+          "pdf_page": 40,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 26,
+          "name": "Collection carousel",
+          "pdf_page": 41,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 27,
+          "name": "Creator mini-review",
+          "pdf_page": 42,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 10,
+      "title": "Creating and collecting",
+      "file": "boards/10-drop-create-save.jpg",
+      "pdf_page": 43,
+      "frames": [
+        {
+          "number": 28,
+          "name": "New drop announcement",
+          "pdf_page": 44,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 29,
+          "name": "Create a drop",
+          "pdf_page": 45,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 30,
+          "name": "Save to a collection",
+          "pdf_page": 46,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 11,
+      "title": "Waiting, starting, reconnecting",
+      "file": "boards/11-loading-empty-offline.jpg",
+      "pdf_page": 47,
+      "frames": [
+        {
+          "number": 31,
+          "name": "Shop loading",
+          "pdf_page": 48,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 32,
+          "name": "Saved / empty",
+          "pdf_page": 49,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 33,
+          "name": "Feed / connection error",
+          "pdf_page": 50,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 12,
+      "title": "Useful recovery paths",
+      "file": "boards/12-checkout-search-recovery.jpg",
+      "pdf_page": 51,
+      "frames": [
+        {
+          "number": 34,
+          "name": "Payment declined",
+          "pdf_page": 52,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 35,
+          "name": "Variant unavailable",
+          "pdf_page": 53,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 36,
+          "name": "Search / no matches",
+          "pdf_page": 54,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 13,
+      "title": "Small interactions, Drip character",
+      "file": "boards/13-like-follow-scrub.jpg",
+      "pdf_page": 55,
+      "frames": [
+        {
+          "number": 37,
+          "name": "Double-tap like",
+          "pdf_page": 56,
+          "crop": [
+            16.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 38,
+          "name": "Follow and mini-profile",
+          "pdf_page": 57,
+          "crop": [
+            492.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        },
+        {
+          "number": 39,
+          "name": "Product scrub",
+          "pdf_page": 58,
+          "crop": [
+            968.0,
+            44.0,
+            466.0,
+            1038.0
+          ]
+        }
+      ]
+    },
+    {
+      "number": 14,
+      "title": "The component language",
+      "file": "boards/14-component-language.jpg",
+      "pdf_page": 59,
+      "frames": []
+    }
+  ],
+  "notes": "Boards preserve the original 1448 \u00d7 1086 images embedded in the PDF. Crop coordinates present each app frame without rewriting image pixels."
+}
