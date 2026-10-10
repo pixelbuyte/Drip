@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient_ } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase-admin';
-import { ANON_COOKIE, verifyAnonId, mintAnonId } from '@/lib/anon-id';
+import { ANON_COOKIE, mintAnonId } from '@/lib/anon-id';
+import { resolveSignedAnonId } from '@/lib/anon-request';
 
 export async function POST(request: NextRequest) {
   const supabase = await createServerClient_();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
 
-  const raw = request.cookies.get(ANON_COOKIE)?.value;
-  const anonId = raw ? await verifyAnonId(raw) : null;
+  const anonId = await resolveSignedAnonId(request);
   if (!anonId) {
     const minted = await mintAnonId();
     const res = NextResponse.json({ linked: false });

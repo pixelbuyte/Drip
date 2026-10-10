@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
-import { ANON_COOKIE, verifyAnonId, hashIp } from '@/lib/anon-id';
+import { hashIp } from '@/lib/anon-id';
+import { resolveSignedAnonId } from '@/lib/anon-request';
 import { recordFeedEventsForAffinity } from '@/lib/feed/affinity-update';
 
 export const dynamic = 'force-dynamic';
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest) {
     return new NextResponse(null, { status: 429 });
   }
 
-  // Identity comes from the signed cookie ONLY.
+  // Identity comes from a SIGNED value only: the cookie, or for native clients
+  // the same signed value in the x-drip-anon-token header.
   //
   // This used to mint a fresh identity for any cookie-less request so a batch
   // was never dropped. That made every spec-2.9 abuse control self-service: a
@@ -69,8 +71,7 @@ export async function POST(request: NextRequest) {
   // routes render, and it is HttpOnly + 2-year Max-Age. Anything without one
   // is a client that discarded it, which is precisely the traffic these caps
   // exist to bound.
-  const raw = request.cookies.get(ANON_COOKIE)?.value;
-  const anonId = raw ? await verifyAnonId(raw) : null;
+  const anonId = await resolveSignedAnonId(request);
   if (!anonId) {
     return NextResponse.json({ error: 'No viewer identity' }, { status: 401 });
   }

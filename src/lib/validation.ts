@@ -68,3 +68,16 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'drop';
 }
+
+const UUID_LIST_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * A comma-separated uuid query parameter. Null when malformed or longer than
+ * `max`; an absent parameter is an empty list. Duplicates are collapsed.
+ */
+export function parseUuidList(raw: string | null, max: number): string[] | null {
+  if (!raw) return [];
+  const ids = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  if (ids.length > max || !ids.every((id) => UUID_LIST_RE.test(id))) return null;
+  return [...new Set(ids)];
+}
