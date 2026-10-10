@@ -28,6 +28,12 @@ export type SliceParams = {
   excludeIds: string[];
   categorySlug?: string | null;
   sellerHandle?: string | null;
+  /**
+   * Restrict to these sellers (the Following surface). An empty array means
+   * "follows nobody" and yields an empty, exhausted slice — never the
+   * unfiltered feed under a Following label.
+   */
+  sellerIds?: string[] | null;
   limit?: number;
   /**
    * published_at of the oldest item already served. Reverse-chronological
@@ -62,6 +68,10 @@ export async function getFeedSlice(
   params: SliceParams
 ): Promise<{ items: FeedItem[]; exhausted: boolean; nextBefore: string | null }> {
   const limit = params.limit ?? FEED_SLICE_SIZE;
+
+  if (params.sellerIds && params.sellerIds.length === 0) {
+    return { items: [], exhausted: true, nextBefore: null };
+  }
 
   // Blocks are a hard filter (spec 2.2): a viewer who said not_interested on a
   // video or a seller must never see them again. Read first so it can be
@@ -104,6 +114,7 @@ export async function getFeedSlice(
 
   if (params.categorySlug) query = query.eq('categories.slug', params.categorySlug);
   if (params.sellerHandle) query = query.eq('profiles.handle', params.sellerHandle);
+  if (params.sellerIds) query = query.in('seller_id', params.sellerIds);
   if (excluded.size > 0) {
     query = query.not('id', 'in', `(${[...excluded].join(',')})`);
   }
@@ -180,4 +191,17 @@ export async function recordSlice(
     ignoreDuplicates: true,
   });
   if (error) console.error('feed_slices write failed:', error.message);
+}
+
+/** Sellers this viewer follows, for the Following surface. Capped: the IN ()
+ *  list must stay a sane statement size. */
+export async function loadFollowedSellerIds(db: SupabaseClient, anonId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from('follows')
+    .select('seller_id')
+    .eq('anon_id', anonId)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) throw new Error(`follows query failed: ${error.message}`);
+  return ((data ?? []) as Array<{ seller_id: string }>).map((r) => r.seller_id);
 }

@@ -18,7 +18,7 @@ import {
 } from '@/lib/scoring';
 import { loadPool } from './pool';
 import { loadViewerContext } from './viewer-context';
-import { getFeedSlice, recordSlice, type SliceParams } from './slice';
+import { getFeedSlice, loadFollowedSellerIds, recordSlice, type SliceParams } from './slice';
 import { loadFeedItemDetails } from './item-details';
 import { FEED_SLICE_SIZE, SSR_PLACEHOLDER_SESSION_ID, type FeedItem, type FeedLane } from './types';
 
@@ -359,13 +359,20 @@ export async function getFeedSliceRankedOrNaive(
   db: SupabaseClient,
   params: RankedOrNaiveParams
 ): Promise<{ items: FeedItem[]; exhausted: boolean; nextBefore: string | null }> {
-  try {
-    const ranked = await getRankedFeedSlice(db, params);
-    if (ranked) return ranked;
-  } catch (err) {
-    console.error('ranked feed slice failed, falling back to naive feed:', err);
+  // Following is a filter, not a ranking: the viewer's own follows, newest
+  // first. It skips the ranker, which has no notion of the surface.
+  const following = params.surface === 'following';
+  if (!following) {
+    try {
+      const ranked = await getRankedFeedSlice(db, params);
+      if (ranked) return ranked;
+    } catch (err) {
+      console.error('ranked feed slice failed, falling back to naive feed:', err);
+    }
   }
-  const naive = await getFeedSlice(db, params);
+  const naive = await getFeedSlice(db, following
+    ? { ...params, sellerIds: await loadFollowedSellerIds(db, params.anonId) }
+    : params);
   // See recordRankedSlice's own guard: the SSR page's placeholder session id
   // must never be written, or every visitor's first render collides into one
   // (session_id, video_id) row.
