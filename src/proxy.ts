@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { ANON_COOKIE, mintAnonId, verifyAnonId } from '@/lib/anon-id';
+import { ANON_COOKIE, mintAnonId } from '@/lib/anon-id';
+import { resolveSignedAnonId } from '@/lib/anon-request';
 
 // Two jobs, deliberately in one place because both must happen before the
 // route renders:
@@ -20,6 +21,11 @@ export const config = {
     '/discover/:path*',
     '/api/events',
     '/api/feed/:path*',
+    // Search reads the same identity. Outside the matcher, a first visit had
+    // none, and the route fell back to a client-chosen x-drip-anon-id — the
+    // proxy overwrites that header with the id it mints.
+    '/search',
+    '/api/search',
   ],
 };
 
@@ -35,8 +41,9 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  const existing = request.cookies.get(ANON_COOKIE)?.value;
-  const verified = existing ? await verifyAnonId(existing) : null;
+  // A signed cookie (browsers) or signed x-drip-anon-token (native) is
+  // already an identity; minting another would fork the device.
+  const verified = await resolveSignedAnonId(request);
   if (verified) return NextResponse.next();
 
   const minted = await mintAnonId();

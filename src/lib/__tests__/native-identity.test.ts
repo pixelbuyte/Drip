@@ -151,3 +151,25 @@ describe('createBearerClient', () => {
     }
   });
 });
+
+describe('proxy', () => {
+  it('does not mint a second identity for a native request carrying a signed token', async () => {
+    const { proxy } = await import('../../proxy');
+    const m = (await mintAnonId())!;
+    const res = await proxy(new NextRequest('https://drip.test/api/feed?session_id=x', {
+      headers: { [ANON_TOKEN_HEADER]: m.cookieValue },
+    }));
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('mints for a cookie-less, token-less browser request', async () => {
+    const { proxy } = await import('../../proxy');
+    const res = await proxy(new NextRequest('https://drip.test/feed'));
+    expect(res.headers.get('set-cookie')).toMatch(/^drip_aid=v1\./);
+  });
+
+  it('covers search, so a first visit there is not identity-less', async () => {
+    const { config } = await import('../../proxy');
+    expect(config.matcher).toEqual(expect.arrayContaining(['/search', '/api/search']));
+  });
+});
