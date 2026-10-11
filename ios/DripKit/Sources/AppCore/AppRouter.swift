@@ -24,6 +24,18 @@ public enum AppTab: String, CaseIterable, Sendable, Hashable {
         case .profile: return "person"
         }
     }
+
+    /// Selected-state symbol. Not every SF Symbol has a `.fill` variant
+    /// (magnifyingglass has none), so this is explicit, never string-built.
+    public var selectedSymbol: String {
+        switch self {
+        case .home: return "house.fill"
+        case .discover: return "magnifyingglass"
+        case .drop: return "plus"
+        case .following: return "person.2.fill"
+        case .profile: return "person.fill"
+        }
+    }
 }
 
 /// Pushed destinations, per tab stack.

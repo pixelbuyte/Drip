@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 import DripModels
 import DesignSystem
 import Discover
-import Explore
 
 /// Frame 16: creator storefront — avatar, serif name, follow, video grid.
 public struct CreatorProfileView: View {

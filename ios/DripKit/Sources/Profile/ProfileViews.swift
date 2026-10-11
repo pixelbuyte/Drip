@@ -4,7 +4,7 @@ import AuthenticationServices
 import DripModels
 import DesignSystem
 import Authentication
-import Explore
+import Discover
 
 /// Sign in with Apple, Google (PKCE web flow), email + password, or an email
 /// code. Apple is offered first: guideline 4.8 requires it alongside Google.

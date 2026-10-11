@@ -22,7 +22,7 @@ final class StripePaymentPresenter: NSObject, PaymentPresenting {
         self.merchantId = merchantId
         self.returnURL = returnURL
         super.init()
-        StripeAPI.defaultPublishableKey = publishableKey
+        STPAPIClient.shared.publishableKey = publishableKey
     }
 
     func present(_ presentation: PaymentPresentation) async -> PaymentOutcome {

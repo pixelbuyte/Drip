@@ -193,7 +193,10 @@ public struct BagView: View {
                                    onCheckout: { onCheckout(line) })
                             .listRowBackground(DripColor.cream)
                     }
-                    .onDelete { idx in idx.map { bag.lines[$0].id }.forEach(bag.remove) }
+                    .onDelete { offsets in
+                        let ids = offsets.map { bag.lines[$0].id }
+                        for id in ids { bag.remove(id) }
+                    }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)

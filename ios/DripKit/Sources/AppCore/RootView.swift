@@ -256,7 +256,7 @@ struct DripTabBar: View {
         } else {
             let isOn = tab == selected
             VStack(spacing: 3) {
-                Image(systemName: isOn ? "\(tab.symbol).fill" : tab.symbol)
+                Image(systemName: isOn ? tab.selectedSymbol : tab.symbol)
                     .font(.system(size: 20, weight: isOn ? .semibold : .regular))
                 Text(tab.title).font(.custom(isOn ? "DMSans-SemiBold" : "DMSans-Medium", size: 11, relativeTo: .caption2))
                 Circle().fill(isOn ? DripColor.coral : .clear).frame(width: 4, height: 4)
