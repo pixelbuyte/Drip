@@ -219,6 +219,9 @@ final class RoutingTests: XCTestCase {
         XCTAssertEqual(DeepLink.parse(URL(string: "https://drip.example.com/search?q=denim")!), .search("denim"))
         XCTAssertEqual(DeepLink.parse(URL(string: "drip://auth-callback?code=1")!), .authCallback)
         XCTAssertNil(DeepLink.parse(URL(string: "drip://creator/..%2Fx")!))
+        XCTAssertNil(DeepLink.parse(URL(string: "drip://creator/..")!))
+        XCTAssertNil(DeepLink.parse(URL(string: "drip://creator/a.b")!))
+        XCTAssertEqual(DeepLink.parse(URL(string: "drip://creator/Maya_Chen")!), .creator(handle: "maya_chen"))
         XCTAssertNil(DeepLink.parse(URL(string: "javascript://x")!))
     }
 

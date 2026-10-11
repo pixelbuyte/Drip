@@ -143,14 +143,18 @@ public enum DeepLink: Equatable, Sendable {
             let q = query.first { $0.name == "q" }?.value ?? ""
             return .search(q)
         case "creator":
-            guard let handle = parts.first, Self.isHandle(handle) else { return nil }
+            guard let handle = parts.first?.lowercased(), Self.isHandle(handle) else { return nil }
             return .creator(handle: handle)
         default:
             return nil
         }
     }
 
+    /// The database's own rule: `CHECK (handle ~ '^[a-z0-9_]{3,30}$')`
+    /// (00006_reconcile_forked_schema.sql). Anything else — including
+    /// "..", which a percent-encoded path decodes to — is not a handle.
     static func isHandle(_ s: String) -> Bool {
-        (1...40).contains(s.count) && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" || $0 == ".") }
+        (3...30).contains(s.count)
+            && s.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" }
     }
 }
