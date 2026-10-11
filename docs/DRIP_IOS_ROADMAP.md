@@ -61,7 +61,9 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 | Comments | Not built | No backend (§5 #3) |
 | Buyer order history | Built + tested (app + API) | `GET /api/me/orders`; Profile → Orders. Needs the migration (`order_items`) to return data |
 | Account deletion | Built + tested (app + API) | `DELETE /api/me`; Profile → Delete account. A seller with buyer orders is refused (409) and needs a support process |
-| Categories / Discover tiles | Not built | Needs `GET /api/categories` |
+| Categories / Discover tiles | Built + tested (app + API) | `GET /api/categories`; Explore → category feed |
+| Creator header counts | Built + tested (app + API) | `GET /api/creators/{handle}` |
+| Shareable video links + universal links | Built + tested (app + API) | `/v/<id>`; needs `APPLE_TEAM_ID` and the Associated Domains capability (release checklist §2) |
 
 **Proposed backend sequence for M4:**
 1. Apply the migration chain.
@@ -93,6 +95,6 @@ Setup: DRIP_CODEMAGIC_SETUP.md.
 | 1 | Approve and run the production migration (00006–00018) per `PREFLIGHT.md`; the Supabase project `tkppdmrkvyjixaiocwmd` isn't visible to this session's Supabase connector | M3, M4, the security fixes |
 | 2 | The Supabase **anon/publishable key** for the new Vercel project `drip` and for the app config (public value) | Vercel switch-over, M3 |
 | 3 | Vercel server secrets in project `drip`: `SUPABASE_SERVICE_ROLE_KEY`, `ANON_ID_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `MUX_TOKEN_ID/SECRET`, `MUX_WEBHOOK_SECRET`, `EASYPOST_API_KEY`, `EASYPOST_WEBHOOK_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` | Real feed, checkout, uploads (none are set in either Vercel project today) |
-| 4 | Codemagic API token (new) + App Store Connect API key + Apple Developer Team ID | M2 (Codemagic), M5 |
+| 4 | Codemagic API token (new) + App Store Connect API key + Apple Developer Team ID (also `APPLE_TEAM_ID` in Vercel) + Associated Domains enabled on the App ID | M2 (Codemagic), M5, universal links |
 | 5 | Supabase Auth: Apple provider, `drip://auth-callback` redirect | Sign-in on device |
 | 6 | Decide whether comments are a launch feature | M4 scope |

@@ -22,6 +22,10 @@ How to use it:
 - [ ] App icon replaced with the final brand asset. **Status today: placeholder wordmark.**
 - [ ] Display fonts locked after a side-by-side with board 14 (Instrument Serif vs a heavier serif; audit B §5.7).
 
+- [ ] **Associated Domains capability enabled on the App ID `com.pixelbuyte.drip`**, and provisioning profiles regenerated. `Drip.entitlements` requests `applinks:$(DRIP_ASSOCIATED_DOMAIN)`, so **signed builds fail until this is done**. The unsigned CI build is unaffected.
+- [ ] `APPLE_TEAM_ID` set in the Vercel production project, so `/.well-known/apple-app-site-association` serves the app ID instead of a 404.
+- [ ] `DRIP_ASSOCIATED_DOMAIN` equals the host of `DRIP_API_BASE_URL`. Codemagic derives it; local builds set it in `Local.xcconfig`.
+
 ## 3. Functional QA on device (iPhone, latest and previous iOS)
 - [ ] Feed: smooth paging; one video audible at a time; offscreen pause; preload (next video starts instantly); memory warning doesn't crash; empty, error and processing states.
 - [ ] Engagement: like, double-tap like, save, follow, share, not interested, report. State persists after relaunch (`/api/me/reactions`).
@@ -39,7 +43,8 @@ How to use it:
 - [ ] Creator profile: grid, follow.
 - [ ] Sign in: Apple, Google, email/password, email code; sign out; session survives relaunch; an expired access token refreshes silently.
 - [ ] Studio: payouts gate → Stripe onboarding → listing creation (`POST /api/videos`) → upload progress → the Mux webhook publishes → the video appears in the feed (needs §1).
-- [ ] Deep links: `drip://bag`, `drip://creator/<handle>`, `drip://search?q=`.
+- [ ] Deep links: `drip://bag`, `drip://creator/<handle>`, `drip://search?q=`, `drip://v/<videoId>`; universal link `https://<host>/v/<videoId>` from Messages opens the app; Share sends that link, and it unfurls with the poster.
+- [ ] Discover: category tiles open that category's feed; a creator page shows follower and drop counts.
 - [ ] Backgrounding: playback pauses; events flush.
 
 ## 4. Accessibility and quality

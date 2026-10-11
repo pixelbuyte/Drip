@@ -69,7 +69,7 @@
 
 ## Since the audit: what `native-ios` has already changed
 
-All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 924 passing tests.
+All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 961 passing tests, and the Swift suite has 102 tests.
 
 | Change | Files | Evidence |
 |---|---|---|
@@ -86,6 +86,8 @@ All changes are backward-compatible with the web app, tested, and pushed on PR #
 | Account deletion: `DELETE /api/me` (cookie or Bearer) plus an in-app entry point. Sellers with buyer orders get a 409, because `orders.seller_id` cascades from `profiles` and deletion would destroy those orders | `src/lib/account-deletion.ts`, `src/app/api/me/route.ts`, `ios/DripKit/Sources/Profile/*` | `account-deletion.test.ts`; `AccountDeletionTests` (Swift) |
 | Buyer order history: `GET /api/me/orders` (guest device + the account's linked devices; a device claimed by another account is excluded) | `src/lib/buyer-orders.ts`, `src/app/api/me/orders/route.ts`, Profile → Orders | `buyer-orders.test.ts`; `BuyerOrdersTests` (Swift) |
 | Creator listings on the feed model: `POST /api/videos` (product + video + link + Mux upload, under the seller's own RLS). The Mux webhook publishes `video:<id>` passthroughs. It also now reads upload-error passthroughs from `new_asset_settings`; before this, upload failures never matched a drop | `src/lib/listings.ts`, `src/app/api/videos/route.ts`, `src/app/api/webhooks/mux/route.ts`, Studio | `listings.test.ts`, `videos-route.test.ts`; Swift `testCreateListingValidationMirrorsTheServerSchema` |
+| Public catalog reads: `GET /api/categories`, `GET /api/creators/{handle}`; Explore category tiles and creator header counts | `src/lib/categories.ts`, `src/lib/creators.ts`, Explore, Creators | `catalog.test.ts`; Swift `CatalogTests` |
+| Shareable video links: `/v/[videoId]`, `GET /api/videos/[id]`, the Apple association file; Share and deep/universal links in the app | `src/app/v/[videoId]`, `src/lib/feed/shared-video.ts`, AppRouter, RootView | `shared-links.test.ts`; Swift `ShareLinkTests`; `next build` |
 | A second device no longer fails to link (finding A-0.6) | `supabase/migrations/00018_claim_second_device.sql` | PostgreSQL 16: reproduced 23505 on the 00010 function; passes with 00018, including two concurrent claims |
 
 ### Still open, and needing a decision or credentials (Proposed order)
