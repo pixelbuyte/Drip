@@ -42,7 +42,7 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 | Five-tab navigation, deep links | Built + routing tests | `RoutingTests` |
 | Paging feed: autoplay, offscreen pause, preload window, player reuse, memory shrink, states | Built; feed logic tested | `FeedModelTests`, `MediaTests` |
 | Feed events with web-identical semantics | Built + tested | `FeedModelTests.testCommitEmitsSkip…` |
-| **Real backend data** | **Blocked** | Production runs the legacy schema, so `/api/feed` has no content (audit A §0.1). Needs the 00006–00017 migration applied, plus Supabase providers configured (DRIP_BACKEND_INTEGRATION.md §1) |
+| **Real backend data** | **Blocked** | Production runs the legacy schema, so `/api/feed` has no content (audit A §0.1). Needs the 00006–00018 migration applied, plus Supabase providers configured (DRIP_BACKEND_INTEGRATION.md §1) |
 | Device run | Not started | Needs a signed development build (M2 → Codemagic) |
 
 ## Milestone 4 — Shopping, creator features and commerce
@@ -90,7 +90,7 @@ Setup: DRIP_CODEMAGIC_SETUP.md.
 
 | # | Item | Unblocks |
 |---|---|---|
-| 1 | Approve and run the production migration (00006–00017) per `PREFLIGHT.md`; the Supabase project `tkppdmrkvyjixaiocwmd` isn't visible to this session's Supabase connector | M3, M4, the security fixes |
+| 1 | Approve and run the production migration (00006–00018) per `PREFLIGHT.md`; the Supabase project `tkppdmrkvyjixaiocwmd` isn't visible to this session's Supabase connector | M3, M4, the security fixes |
 | 2 | The Supabase **anon/publishable key** for the new Vercel project `drip` and for the app config (public value) | Vercel switch-over, M3 |
 | 3 | Vercel server secrets in project `drip`: `SUPABASE_SERVICE_ROLE_KEY`, `ANON_ID_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `MUX_TOKEN_ID/SECRET`, `MUX_WEBHOOK_SECRET`, `EASYPOST_API_KEY`, `EASYPOST_WEBHOOK_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL` | Real feed, checkout, uploads (none are set in either Vercel project today) |
 | 4 | Codemagic API token (new) + App Store Connect API key + Apple Developer Team ID | M2 (Codemagic), M5 |

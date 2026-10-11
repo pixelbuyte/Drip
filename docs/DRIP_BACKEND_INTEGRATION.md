@@ -111,14 +111,14 @@ Response:
 
 | # | Gap | Effect on native | Proposed fix | Evidence |
 |---|---|---|---|---|
-| 1 | **Production runs the legacy schema**; chain 00006–00017 not applied | No feed content, no purchase path, live RLS holes | Apply the chain per `docs/production-migration/PREFLIGHT.md` after its blockers clear | audit A §0.1, §0.4 |
+| 1 | **Production runs the legacy schema**; chain 00006–00018 not applied | No feed content, no purchase path, live RLS holes | Apply the chain per `docs/production-migration/PREFLIGHT.md` after its blockers clear | audit A §0.1, §0.4 |
 | 2 | ~~No videos/products creation path~~ **Built:** `POST /api/videos` | Creator uploads reach the feed | Creates `shipping_profiles`, `products`, `videos` and `video_products` under the seller's own session, so owner RLS applies. The Mux upload carries passthrough `video:<id>`. The Mux webhook moves the video from `processing` to `live` (playback id, duration, aspect ratio, thumbnail, `published_at`); it moves an over-length or errored video to `removed`. Legacy drop passthroughs still update `drops`. The web composer stays on `/api/drops` until the migration ships, then must switch | `src/lib/listings.ts`, `src/app/api/videos/route.ts` |
 | 3 | **No comments backend** | Comments omitted from the native UI | `comments` table + RLS + `GET/POST /api/videos/{id}/comments` + moderation/report | audit C §3 |
 | 4 | ~~No account deletion~~ **Built:** `DELETE /api/me` with body `{"confirm":"DELETE"}` | App Store 5.1.1(v) | Deletes the auth user, which cascades to the profile and listings. Orders the user placed as a buyer stay with the seller, with `buyer_viewer_id` set to NULL. A seller with buyer orders gets a 409 `seller_has_orders`, to be closed by support (otherwise the cascade would delete those orders) | `src/lib/account-deletion.ts` |
 | 5 | ~~No buyer order history~~ **Built:** `GET /api/me/orders` | Profile → Orders | Matches orders by `buyer_anon_id` across this device's identity and every identity the account owns. A device identity claimed by another account is excluded, so a shared device never shows the previous person's orders or addresses. Orders are not matched by `buyer_email`, because that email is typed at checkout and unverified. Needs the post-migration schema (`order_items`, `total_cents`) | `src/lib/buyer-orders.ts` |
 | 6 | **No categories endpoint** | Discover can't show category tiles | `GET /api/categories` (public read) | DRIP_SCREEN_INVENTORY.md |
 | 7 | **No per-video share route** | Share links go to the site root | `/v/[videoId]` page + `apple-app-site-association` | `src/proxy.ts` matcher lists `/v/*` with no route |
-| 8 | `claim_anon_identity` 23505 on second device | Link fails silently on a second device | Allow multiple canonical identities per user, or return false instead of raising | audit A §0.6 |
+| 8 | ~~`claim_anon_identity` 23505 on second device~~ **Fixed in `00018`** | Signing in on a second device now links | A newly claimed identity points at the account's existing canonical identity; it becomes canonical itself only on the account's first device. A per-user advisory lock serialises concurrent claims, and identities owned by another account are still refused | `supabase/migrations/00018_claim_second_device.sql` |
 | 9 | Like/save are events, so dedupe can drop a quick re-like | Rare stale heart state | Dedicated idempotent `PUT /api/me/reactions/{videoId}` | `00008` dedupe key; `00017` |
 
 ---
@@ -134,6 +134,7 @@ Response:
 | Following surface | `src/lib/feed/slice.ts`, `ranked-slice.ts` | `ranked-slice.test.ts` |
 | Feed cursor | `src/lib/feed/slice.ts` | `slice.test.ts` (fails on the old code) |
 | Like/save clobber | `supabase/migrations/00017_reactions_no_clobber.sql` | executed against PostgreSQL 16 (7 sequences); not yet applied anywhere |
+| Second-device sign-in | `supabase/migrations/00018_claim_second_device.sql` | PostgreSQL 16: the 00010 function raises 23505 on device 2; with 00018, devices 2 and 3 link to device 1's canonical identity, re-claim is idempotent, another account is refused, and two concurrent claims produce exactly one canonical identity. Not yet applied anywhere |
 
 Web suite: 886 passed, 1 skipped; `tsc --noEmit` clean.
 

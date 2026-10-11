@@ -6,7 +6,7 @@ How to use it:
 - Nothing ships to the App Store without an explicit, named approval (`RELEASE_APPROVED_BY` in Codemagic).
 
 ## 1. Backend readiness
-- [ ] Migration chain `00006`–`00017` applied to production, following `docs/production-migration/PREFLIGHT.md` (PITR on, fresh snapshot taken, rollback rehearsed). **Status today: not applied; PREFLIGHT says "NOT READY".**
+- [ ] Migration chain `00006`–`00018` applied to production, following `docs/production-migration/PREFLIGHT.md` (PITR on, fresh snapshot taken, rollback rehearsed). **Status today: not applied; PREFLIGHT says "NOT READY".**
 - [ ] Production RLS re-checked after the migration: there must be no `orders_insert_for_seller`, `orders_seller_update_own` or `seller_payments_self_update` (audit A §0.4).
 - [ ] Videos/products creation endpoint and Mux webhook support for `videos`, so creator uploads reach the feed.
 - [ ] Account deletion endpoint (App Store 5.1.1(v)) and an in-app entry point. **Status today: built and tested (`DELETE /api/me`, Profile → Delete account); verify on device. Define the support process for sellers with buyer orders (they get a 409).**
