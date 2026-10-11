@@ -82,7 +82,41 @@ public struct PaymentIntentResponse: Codable, Sendable, Equatable {
 }
 
 /// POST /api/drops — src/lib/validation.ts `createDropSchema`.
-public struct CreateDropRequest: Codable, Sendable, Equatable {
+/// The fixed category list seeded by 00007_feed_content_model.sql
+/// (src/lib/listings.ts CATEGORY_SLUGS).
+public enum ListingCategory: String, Codable, Sendable, CaseIterable, Identifiable {
+    case apparel, footwear
+    case jewelryAccessories = "jewelry-accessories"
+    case beauty
+    case homeDecor = "home-decor"
+    case vintageThrift = "vintage-thrift"
+    case collectibles
+    case handmadeCraft = "handmade-craft"
+    case techGadgets = "tech-gadgets"
+    case pet, fitness, other
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .apparel: return "Apparel"
+        case .footwear: return "Footwear"
+        case .jewelryAccessories: return "Jewelry & Accessories"
+        case .beauty: return "Beauty"
+        case .homeDecor: return "Home & Decor"
+        case .vintageThrift: return "Vintage & Thrift"
+        case .collectibles: return "Collectibles"
+        case .handmadeCraft: return "Handmade & Craft"
+        case .techGadgets: return "Tech & Gadgets"
+        case .pet: return "Pet"
+        case .fitness: return "Fitness"
+        case .other: return "Other"
+        }
+    }
+}
+
+/// POST /api/videos body (src/lib/listings.ts createListingSchema).
+public struct CreateListingRequest: Codable, Sendable, Equatable {
     public struct Dimensions: Codable, Sendable, Equatable {
         public var lengthIn: Double
         public var widthIn: Double
@@ -109,28 +143,39 @@ public struct CreateDropRequest: Codable, Sendable, Equatable {
     public var title: String
     public var description: String?
     public var priceCents: Int
+    public var compareAtPriceCents: Int?
     public var inventory: Int
     public var weightOz: Double
     public var dimensions: Dimensions
     public var variants: [VariantDimension]?
+    public var caption: String?
+    public var hashtags: [String]?
+    public var category: ListingCategory
 
-    public init(title: String, description: String?, priceCents: Int, inventory: Int,
-                weightOz: Double, dimensions: Dimensions, variants: [VariantDimension]?) {
+    public init(title: String, description: String?, priceCents: Int, compareAtPriceCents: Int? = nil,
+                inventory: Int, weightOz: Double, dimensions: Dimensions, variants: [VariantDimension]?,
+                caption: String? = nil, hashtags: [String]? = nil, category: ListingCategory = .other) {
         self.title = title
         self.description = description
         self.priceCents = priceCents
+        self.compareAtPriceCents = compareAtPriceCents
         self.inventory = inventory
         self.weightOz = weightOz
         self.dimensions = dimensions
         self.variants = variants
+        self.caption = caption
+        self.hashtags = hashtags
+        self.category = category
     }
 
     enum CodingKeys: String, CodingKey {
         case title, description
         case priceCents = "price_cents"
+        case compareAtPriceCents = "compare_at_price_cents"
         case inventory
         case weightOz = "weight_oz"
-        case dimensions, variants
+        case dimensions, variants, caption, hashtags
+        case category = "category_slug"
     }
 
     /// The server's zod rules, checked before a network round trip. The server
@@ -140,9 +185,12 @@ public struct CreateDropRequest: Codable, Sendable, Equatable {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { errors.append("Title is required") }
         if trimmed.count > 100 { errors.append("Title must be 100 characters or less") }
-        if (description ?? "").count > 280 { errors.append("Description must be 280 characters or less") }
+        if (description ?? "").count > 1000 { errors.append("Description must be 1000 characters or less") }
         if priceCents < 100 { errors.append("Minimum price is $1.00") }
         if priceCents > 99_999_900 { errors.append("Price too high") }
+        if let was = compareAtPriceCents, was <= priceCents {
+            errors.append("The \u{201C}was\u{201D} price must be higher than the price")
+        }
         if inventory < 1 { errors.append("Inventory must be at least 1") }
         if inventory > 100_000 { errors.append("Inventory too high") }
         if weightOz < 0.1 || weightOz > 1120 { errors.append("Weight is required for shipping") }
@@ -158,20 +206,37 @@ public struct CreateDropRequest: Codable, Sendable, Equatable {
                 if v.options.count > 5 { errors.append("Max 5 options per variant") }
             }
         }
+        if (caption ?? "").count > 500 { errors.append("Caption must be 500 characters or less") }
+        if let hashtags {
+            if hashtags.count > 10 { errors.append("Max 10 hashtags") }
+            if hashtags.contains(where: { $0.isEmpty || $0.count > 30 }) { errors.append("Hashtags are 1 to 30 characters") }
+        }
         return errors
+    }
+
+    /// "#tote, everyday rotation" → ["tote", "everydayrotation"]. The database
+    /// normalises again (normalize_video_hashtags); this keeps the count honest.
+    public static func hashtags(from text: String) -> [String] {
+        var seen = Set<String>()
+        return text.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\n" })
+            .map { $0.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "_" } }
+            .map { String($0.prefix(30)) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 }
 
-public struct CreateDropResponse: Codable, Sendable, Equatable {
-    public struct Drop: Codable, Sendable, Equatable {
+public struct CreateListingResponse: Codable, Sendable, Equatable {
+    public struct Video: Codable, Sendable, Equatable { public var id: String }
+    public struct Product: Codable, Sendable, Equatable {
         public var id: String
         public var slug: String
     }
-    public var drop: Drop
+    public var video: Video
+    public var product: Product
     public var uploadUrl: String
 
     enum CodingKeys: String, CodingKey {
-        case drop
+        case video, product
         case uploadUrl = "upload_url"
     }
 }

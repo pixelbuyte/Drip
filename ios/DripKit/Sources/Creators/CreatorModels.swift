@@ -70,6 +70,10 @@ public final class StudioModel {
     public var heightIn = 2.0
     public var variantName = ""
     public var variantOptions = ""
+    public var caption = ""
+    public var hashtagsText = ""
+    public var category: ListingCategory = .other
+    public var wasPriceText = ""
     public var videoFile: URL?
 
     private let api: APIClient
@@ -115,37 +119,47 @@ public final class StudioModel {
         return NSDecimalNumber(decimal: rounded).intValue
     }
 
-    public var request: CreateDropRequest? {
+    public var request: CreateListingRequest? {
         guard let cents = Self.cents(from: priceText) else { return nil }
         let options = variantOptions.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        let variants: [CreateDropRequest.VariantDimension]? =
+        let variants: [CreateListingRequest.VariantDimension]? =
             variantName.trimmingCharacters(in: .whitespaces).isEmpty || options.isEmpty
             ? nil : [.init(name: variantName.trimmingCharacters(in: .whitespaces), options: options)]
-        return CreateDropRequest(
+        let was = wasPriceText.trimmingCharacters(in: .whitespaces)
+        let tags = CreateListingRequest.hashtags(from: hashtagsText)
+        let captionText = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        return CreateListingRequest(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             description: details.isEmpty ? nil : details,
-            priceCents: cents, inventory: inventory, weightOz: weightOz,
+            priceCents: cents,
+            compareAtPriceCents: was.isEmpty ? nil : Self.cents(from: was),
+            inventory: inventory, weightOz: weightOz,
             dimensions: .init(lengthIn: lengthIn, widthIn: widthIn, heightIn: heightIn),
-            variants: variants)
+            variants: variants,
+            caption: captionText.isEmpty ? nil : captionText,
+            hashtags: tags.isEmpty ? nil : tags,
+            category: category)
     }
 
     public var validationErrors: [String] {
         var errors: [String] = []
         if Self.cents(from: priceText) == nil { errors.append("Enter a price like 24 or 24.50") }
+        let was = wasPriceText.trimmingCharacters(in: .whitespaces)
+        if !was.isEmpty, Self.cents(from: was) == nil { errors.append("Enter the \u{201C}was\u{201D} price like 98") }
         if let r = request { errors += r.validationErrors() }
         if videoFile == nil { errors.append("Choose a video") }
         return errors
     }
 
-    public func publishDrop() async {
+    public func publishListing() async {
         guard validationErrors.isEmpty, let request, let file = videoFile else {
             publish = .failed(validationErrors.first ?? "Check the form")
             return
         }
         publish = .creating
         do {
-            let created = try await api.send(DripAPI.createDrop(request))
+            let created = try await api.send(DripAPI.createListing(request))
             guard let uploadURL = URL(string: created.uploadUrl) else {
                 publish = .failed("The upload link was invalid.")
                 return
@@ -156,7 +170,7 @@ public final class StudioModel {
                 Task { @MainActor in self?.publish = .uploading(p.fraction) }
             }
             #endif
-            publish = .done(slug: created.drop.slug)
+            publish = .done(slug: created.product.slug)
         } catch let e as APIError {
             publish = .failed(e.userMessage)
         } catch UploadError.tooLarge {
@@ -169,6 +183,7 @@ public final class StudioModel {
     public func resetForm() {
         title = ""; details = ""; priceText = ""; inventory = 1
         variantName = ""; variantOptions = ""; videoFile = nil
+        caption = ""; hashtagsText = ""; category = .other; wasPriceText = ""
         publish = .editing
     }
 }

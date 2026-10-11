@@ -107,9 +107,11 @@ public enum DripAPI {
 
     // MARK: Creators
 
-    /// POST /api/drops — creates the listing and a Mux direct-upload URL.
-    public static func createDrop(_ body: CreateDropRequest) throws -> Endpoint<CreateDropResponse> {
-        Endpoint(.post, "/api/drops", body: try JSONEncoder.drip.encode(body), auth: .required, timeout: 30)
+    /// POST /api/videos — creates the product, the video and their link, plus
+    /// a Mux direct-upload URL. The Mux webhook publishes the video when the
+    /// asset is ready (src/app/api/videos/route.ts).
+    public static func createListing(_ body: CreateListingRequest) throws -> Endpoint<CreateListingResponse> {
+        Endpoint(.post, "/api/videos", body: try JSONEncoder.drip.encode(body), auth: .required, timeout: 30)
     }
 
     /// GET /api/stripe/onboarding/status

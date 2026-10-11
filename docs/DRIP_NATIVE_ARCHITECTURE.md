@@ -157,8 +157,8 @@ The app contains only public values: the API base URL, Supabase URL, Supabase an
 - **Profile.** `GET /api/feed?surface=seller_profile&seller=<handle>`; follow is an event keyed to one of the creator's videos.
 - **Studio:**
   - Payouts gate via `/api/stripe/onboarding/status` and `start`. Hosted onboarding opens in `ASWebAuthenticationSession`, never in an embedded web view.
-  - Drop creation via `POST /api/drops`, then a Mux direct-upload `PUT` with progress.
-  - **Known blocker:** `/api/drops` writes the legacy `drops` table, which the feed doesn't read (audit A §0.3). The native flow is correct against today's API, but published drops won't appear in the feed until the backend gains a videos/products creation endpoint.
+  - Listing creation via `POST /api/videos` (product, video, category, caption, hashtags, optional "was" price), then a Mux direct-upload `PUT` with progress. The Mux webhook publishes the video when the asset is ready.
+  - Needs the post-migration schema (`videos`, `products`); against today's production schema the endpoint fails, by design, rather than writing to `drops`.
 
 ## 7. Navigation
 

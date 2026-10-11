@@ -38,7 +38,7 @@ How to use it:
 - [ ] Following: shows only followed creators; empty state when following nobody.
 - [ ] Creator profile: grid, follow.
 - [ ] Sign in: Apple, Google, email/password, email code; sign out; session survives relaunch; an expired access token refreshes silently.
-- [ ] Studio: payouts gate → Stripe onboarding → drop creation → upload progress → the video appears in the feed (needs §1).
+- [ ] Studio: payouts gate → Stripe onboarding → listing creation (`POST /api/videos`) → upload progress → the Mux webhook publishes → the video appears in the feed (needs §1).
 - [ ] Deep links: `drip://bag`, `drip://creator/<handle>`, `drip://search?q=`.
 - [ ] Backgrounding: playback pauses; events flush.
 

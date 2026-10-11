@@ -57,7 +57,7 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 | Saved list | Built (app + API) | — |
 | Search | Built + tested | — |
 | Creator profile | Built | A profile endpoint is needed for bio and follower counts |
-| Studio: payouts gate + drop creation + Mux upload | Built against existing routes | **Blocked:** `/api/drops` writes legacy `drops`; the feed reads `videos`. Needs a videos-model creation endpoint and Mux webhook support (DRIP_BACKEND_INTEGRATION.md §5 #2) |
+| Studio: payouts gate + listing creation + Mux upload | Built + tested (app + API): `POST /api/videos`; the Mux webhook publishes to the feed | Needs the migration to run in production (DRIP_BACKEND_INTEGRATION.md §5 #2) |
 | Comments | Not built | No backend (§5 #3) |
 | Buyer order history | Built + tested (app + API) | `GET /api/me/orders`; Profile → Orders. Needs the migration (`order_items`) to return data |
 | Account deletion | Built + tested (app + API) | `DELETE /api/me`; Profile → Delete account. A seller with buyer orders is refused (409) and needs a support process |
@@ -65,7 +65,7 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 
 **Proposed backend sequence for M4:**
 1. Apply the migration chain.
-2. Add a videos/products creation endpoint and the Mux webhook update.
+2. ~~Add a videos/products creation endpoint and the Mux webhook update.~~ Done.
 3. ~~Account deletion.~~ Done.
 4. ~~Orders read.~~ Done.
 5. Comments.

@@ -69,7 +69,7 @@
 
 ## Since the audit: what `native-ios` has already changed
 
-All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 910 passing tests.
+All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 924 passing tests.
 
 | Change | Files | Evidence |
 |---|---|---|
@@ -85,10 +85,11 @@ All changes are backward-compatible with the web app, tested, and pushed on PR #
 | EasyPost webhook fails closed (503) when `EASYPOST_WEBHOOK_SECRET` is unset, and never verifies against an empty key (finding C-4.1) | `src/app/api/webhooks/easypost/route.ts`, `src/lib/easypost.ts` | `security-fixes.test.ts` |
 | Account deletion: `DELETE /api/me` (cookie or Bearer) plus an in-app entry point. Sellers with buyer orders get a 409, because `orders.seller_id` cascades from `profiles` and deletion would destroy those orders | `src/lib/account-deletion.ts`, `src/app/api/me/route.ts`, `ios/DripKit/Sources/Profile/*` | `account-deletion.test.ts`; `AccountDeletionTests` (Swift) |
 | Buyer order history: `GET /api/me/orders` (guest device + the account's linked devices; a device claimed by another account is excluded) | `src/lib/buyer-orders.ts`, `src/app/api/me/orders/route.ts`, Profile → Orders | `buyer-orders.test.ts`; `BuyerOrdersTests` (Swift) |
+| Creator listings on the feed model: `POST /api/videos` (product + video + link + Mux upload, under the seller's own RLS). The Mux webhook publishes `video:<id>` passthroughs. It also now reads upload-error passthroughs from `new_asset_settings`; before this, upload failures never matched a drop | `src/lib/listings.ts`, `src/app/api/videos/route.ts`, `src/app/api/webhooks/mux/route.ts`, Studio | `listings.test.ts`, `videos-route.test.ts`; Swift `testCreateListingValidationMirrorsTheServerSchema` |
 
 ### Still open, and needing a decision or credentials (Proposed order)
 1. **Production migration.** Apply the `00006`–`00017` chain to production once `PREFLIGHT.md`'s blockers (PITR, fresh snapshot) are cleared. This one step fixes the security holes in §3 and makes the feed real. **Owner decision; cannot be done from this session.**
-2. **Videos-model creation endpoint.** Add a `videos`/`products` creation endpoint and Mux webhook handling for `videos`, so creator uploads reach the feed (Part A §0.3).
+2. ~~Videos-model creation endpoint~~ Done (`POST /api/videos` + Mux webhook). After the migration, the web composer must switch from `/api/drops` as well.
 3. **Native checkout prerequisites.** Collect the buyer email (the native app already sends it), set the shipping address before confirm (the native app collects it via Stripe's address element), and make the stock decrement idempotent.
 4. ~~Account deletion endpoint~~ Done (see above). Closing a seller account that has buyer orders is a support process.
 5. **Comments** (table, RLS, routes) if comments are a launch feature.

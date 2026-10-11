@@ -54,14 +54,37 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(Set(json.keys), ["video_id", "product_id", "quantity", "selection", "idempotency_key", "email"])
     }
 
-    func testCreateDropValidationMirrorsTheServerSchema() {
-        let ok = CreateDropRequest(title: "Tote", description: nil, priceCents: 7800, inventory: 3, weightOz: 8,
-                                   dimensions: .init(lengthIn: 9, widthIn: 6, heightIn: 2), variants: nil)
+    func testCreateListingValidationMirrorsTheServerSchema() throws {
+        let ok = CreateListingRequest(title: "Tote", description: nil, priceCents: 7800, inventory: 3, weightOz: 8,
+                                      dimensions: .init(lengthIn: 9, widthIn: 6, heightIn: 2), variants: nil)
         XCTAssertEqual(ok.validationErrors(), [])
         var bad = ok
         bad.priceCents = 99
         bad.variants = [.init(name: "Color", options: ["a", "b", "c", "d", "e", "f"])]
         XCTAssertEqual(bad.validationErrors(), ["Minimum price is $1.00", "Max 5 options per variant"])
+
+        var was = ok
+        was.compareAtPriceCents = 7800
+        XCTAssertEqual(was.validationErrors().count, 1)
+
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            CreateListingRequest(title: "Tote", description: nil, priceCents: 7800, compareAtPriceCents: 9800,
+                                 inventory: 3, weightOz: 8, dimensions: .init(lengthIn: 9, widthIn: 6, heightIn: 2),
+                                 variants: nil, caption: "c", hashtags: ["tote"], category: .homeDecor))) as! [String: Any]
+        XCTAssertEqual(json["category_slug"] as? String, "home-decor")
+        XCTAssertEqual(json["compare_at_price_cents"] as? Int, 9800)
+        XCTAssertEqual(json["hashtags"] as? [String], ["tote"])
+    }
+
+    func testHashtagParsing() {
+        XCTAssertEqual(CreateListingRequest.hashtags(from: "#Tote, everyday  #tote, x!y"), ["tote", "everyday", "xy"])
+        XCTAssertEqual(CreateListingRequest.hashtags(from: "  "), [])
+    }
+
+    func testCategoriesMatchTheSeededSlugs() {
+        XCTAssertEqual(ListingCategory.allCases.map(\.rawValue),
+                       ["apparel", "footwear", "jewelry-accessories", "beauty", "home-decor", "vintage-thrift",
+                        "collectibles", "handmade-craft", "tech-gadgets", "pet", "fitness", "other"])
     }
 }
 
@@ -83,15 +106,15 @@ final class APIClientTests: XCTestCase {
 
     func testRefreshesOnceOn401ThenRetries() async throws {
         let t = StubTransport()
-        t.on("/api/drops") { req in
+        t.on("/api/videos") { req in
             req.headers["Authorization"] == "Bearer fresh"
-                ? HTTPResponse(status: 200, body: Data(#"{"drop":{"id":"d","slug":"s"},"upload_url":"https://u.test"}"#.utf8))
+                ? HTTPResponse(status: 201, body: Data(#"{"video":{"id":"v"},"product":{"id":"p","slug":"s"},"upload_url":"https://u.test"}"#.utf8))
                 : HTTPResponse(status: 401, body: Data(#"{"error":"Not authenticated"}"#.utf8))
         }
         let tokens = FakeTokens(token: "stale", refreshed: "fresh")
         let api = APIClient(baseURL: base, transport: t, tokens: tokens)
-        let r = try await api.send(DripAPI.createDrop(.init(title: "t", description: nil, priceCents: 100, inventory: 1,
-                                                            weightOz: 1, dimensions: .init(lengthIn: 1, widthIn: 1, heightIn: 1), variants: nil)))
+        let r = try await api.send(DripAPI.createListing(.init(title: "t", description: nil, priceCents: 100, inventory: 1,
+                                                               weightOz: 1, dimensions: .init(lengthIn: 1, widthIn: 1, heightIn: 1), variants: nil)))
         XCTAssertEqual(r.uploadUrl, "https://u.test")
         let count = await tokens.refreshCount
         XCTAssertEqual(count, 1)

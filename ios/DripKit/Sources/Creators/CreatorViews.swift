@@ -154,9 +154,16 @@ public struct StudioView: View {
                     .frame(minHeight: 72)
                     .background(DripColor.peach.opacity(0.55), in: RoundedRectangle(cornerRadius: DripRadius.tile, style: .continuous))
                 }
+                field("Caption", text: $model.caption, prompt: "What's the story? Up to 500 characters", axis: .vertical)
+                field("Hashtags", text: $model.hashtagsText, prompt: "tote, everyday")
                 field("Title", text: $model.title, prompt: "The Studio Tote")
-                field("Description", text: $model.details, prompt: "Up to 280 characters", axis: .vertical)
+                field("Description", text: $model.details, prompt: "Up to 1000 characters", axis: .vertical)
                 field("Price (USD)", text: $model.priceText, prompt: "78", keyboard: .decimalPad)
+                field("Was (optional)", text: $model.wasPriceText, prompt: "98", keyboard: .decimalPad)
+                Picker("Category", selection: $model.category) {
+                    ForEach(ListingCategory.allCases) { c in Text(c.displayName).tag(c) }
+                }
+                .dripText(.body).tint(DripColor.ink)
                 Stepper("Inventory: \(model.inventory)", value: $model.inventory, in: 1...100_000)
                     .dripText(.body)
                 DisclosureGroup("Shipping package") {
@@ -183,14 +190,14 @@ public struct StudioView: View {
     @ViewBuilder private var publishButton: some View {
         switch model.publish {
         case .creating:
-            ProgressView("Creating your drop…").frame(maxWidth: .infinity)
+            ProgressView("Creating your listing…").frame(maxWidth: .infinity)
         case .uploading(let f):
             VStack(alignment: .leading) {
                 ProgressView(value: f).tint(DripColor.coral)
                 Text("Uploading \(Int(f * 100))%").dripText(.meta).foregroundStyle(DripColor.muted)
             }
         default:
-            Button("Publish drop") { Task { await model.publishDrop() } }
+            Button("Publish") { Task { await model.publishListing() } }
                 .buttonStyle(.drip(.primary))
                 .disabled(!model.validationErrors.isEmpty)
                 .accessibilityHint(model.validationErrors.first ?? "")
