@@ -97,6 +97,19 @@ public final class AppEnvironment {
         return FeedModel(source: source, api: api, tracker: tracker)
     }
 
+    public func sharedVideoModel(_ videoId: String) -> SharedVideoModel {
+        SharedVideoModel(videoId: videoId, api: api, tracker: tracker)
+    }
+
+    /// Routes an inbound URL (custom scheme or universal link) and applies
+    /// what the router cannot: a search link also fills the Explore query.
+    @discardableResult
+    public func open(_ url: URL) -> DeepLink? {
+        let link = router.open(url, scheme: config.urlScheme)
+        if case .search(let q)? = link, !q.isEmpty { explore.query = q }
+        return link
+    }
+
     /// App going to background: deliver what's buffered.
     public func flushTelemetry() async {
         await tracker.flush()

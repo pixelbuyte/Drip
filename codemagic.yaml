@@ -9,7 +9,8 @@
 #     issuer id, key id, .p8) — used for signing-file fetch and TestFlight.
 #   - Environment variable group `drip_public_config` — PUBLIC values only:
 #       DRIP_API_BASE_URL, DRIP_SUPABASE_URL, DRIP_SUPABASE_ANON_KEY,
-#       DRIP_STRIPE_PUBLISHABLE_KEY, DRIP_TEAM_ID, DRIP_APPLE_MERCHANT_ID
+#       DRIP_STRIPE_PUBLISHABLE_KEY, DRIP_TEAM_ID, DRIP_APPLE_MERCHANT_ID,
+#       optional DRIP_ASSOCIATED_DOMAIN (defaults to DRIP_API_BASE_URL's host)
 #   - Environment variable group `drip_release_guard` — RELEASE_APPROVED_BY
 #     (the name of whoever approved a production release; checked below).
 # See docs/DRIP_CODEMAGIC_SETUP.md.
@@ -61,6 +62,9 @@ definitions:
         # "//" would start an xcconfig comment, so URLs are rewritten to
         # https:$(SLASH)$(SLASH)host.
         esc() { printf '%s' "$1" | sed 's#//#$(SLASH)$(SLASH)#'; }
+        # Universal links (applinks:) — the API base URL's bare host unless
+        # DRIP_ASSOCIATED_DOMAIN is set. Share links are built from that URL.
+        ASSOCIATED_DOMAIN="${DRIP_ASSOCIATED_DOMAIN:-$(printf '%s' "$DRIP_API_BASE_URL" | sed -E 's#^[A-Za-z]+://##; s#[/:?].*$##')}"
         {
           echo "DRIP_TEAM_ID = $DRIP_TEAM_ID"
           echo "DRIP_API_BASE_URL = $(esc "$DRIP_API_BASE_URL")"
@@ -68,6 +72,7 @@ definitions:
           echo "DRIP_SUPABASE_ANON_KEY = $DRIP_SUPABASE_ANON_KEY"
           echo "DRIP_STRIPE_PUBLISHABLE_KEY = $DRIP_STRIPE_PUBLISHABLE_KEY"
           echo "DRIP_APPLE_MERCHANT_ID = ${DRIP_APPLE_MERCHANT_ID:-merchant.com.pixelbuyte.drip}"
+          echo "DRIP_ASSOCIATED_DOMAIN = $ASSOCIATED_DOMAIN"
         } > ios/Config/Local.xcconfig
         echo "Wrote ios/Config/Local.xcconfig (values not printed)"
     - &version

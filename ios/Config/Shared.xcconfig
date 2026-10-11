@@ -19,6 +19,12 @@ DRIP_URL_SCHEME = drip
 DRIP_TEAM_ID =
 DRIP_APPLE_MERCHANT_ID = merchant.com.pixelbuyte.drip
 
+// Universal-links domain: the bare host of DRIP_API_BASE_URL (no scheme, no
+// path), e.g. drip.example.com — share links are built from the API base
+// URL, so the two must match. Feeds the applinks: entry in Drip.entitlements.
+// Codemagic derives it from DRIP_API_BASE_URL unless set explicitly.
+DRIP_ASSOCIATED_DOMAIN =
+
 // Placeholders so an unconfigured build compiles and then shows the
 // in-app "This build isn't configured" screen instead of crashing.
 DRIP_API_BASE_URL =
