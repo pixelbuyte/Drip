@@ -12,5 +12,13 @@
 	<array>
 		<string>$(DRIP_APPLE_MERCHANT_ID)</string>
 	</array>
+	<!-- Universal links: https://<domain>/v/<videoId> opens the app at that
+	     video. The site serves /.well-known/apple-app-site-association once
+	     APPLE_TEAM_ID is set on the deployment. The App ID must have the
+	     Associated Domains capability. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:$(DRIP_ASSOCIATED_DOMAIN)</string>
+	</array>
 </dict>
 </plist>

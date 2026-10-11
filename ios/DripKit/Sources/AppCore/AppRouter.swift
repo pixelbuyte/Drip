@@ -43,6 +43,8 @@ public enum AppRoute: Hashable, Sendable {
     case creator(Seller)
     /// A vertical feed opened on items another screen already holds.
     case feed(FeedSeed)
+    /// A feed opened on one shared video, fetched by id (`DeepLink.video`).
+    case sharedVideo(videoId: String)
 }
 
 public struct FeedSeed: Hashable, Sendable {
@@ -113,11 +115,28 @@ public final class AppRouter {
             selectedTab = .discover
         case .bag:
             sheet = .bag
+        case .video(let id):
+            // Replaces Home's stack rather than appending, so the same link
+            // delivered twice (onOpenURL and onContinueUserActivity can both
+            // see a universal link) lands on one screen, not two.
+            selectedTab = .home
+            paths[.home] = [.sharedVideo(videoId: id)]
         case .authCallback:
             // Consumed by ASWebAuthenticationSession; nothing to route.
             break
         }
         return true
+    }
+
+    /// Every inbound URL — custom scheme (`onOpenURL`) or universal link
+    /// (`onContinueUserActivity(NSUserActivityTypeBrowsingWeb)`) — goes
+    /// through here. Returns the link it routed, nil when the URL is not one
+    /// of ours.
+    @discardableResult
+    public func open(_ url: URL, scheme: String) -> DeepLink? {
+        guard let link = DeepLink.parse(url, scheme: scheme) else { return nil }
+        handle(link)
+        return link
     }
 }
 
@@ -126,11 +145,14 @@ public enum DeepLink: Equatable, Sendable {
     case creator(handle: String)
     case search(String)
     case bag
+    /// One shared video; the id is a normalized (lowercase) uuid.
+    case video(id: String)
     case authCallback
 
     /// drip://home, drip://bag, drip://search?q=..., drip://creator/<handle>,
-    /// and the website's /search?q=... URLs (universal links, once the
-    /// apple-app-site-association file is served).
+    /// drip://v/<videoId>, and the website's /search?q=... and /v/<videoId>
+    /// URLs (universal links: the site serves
+    /// /.well-known/apple-app-site-association claiming /v/*).
     public static func parse(_ url: URL, scheme: String = "drip") -> DeepLink? {
         let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let query = comps?.queryItems ?? []
@@ -157,6 +179,9 @@ public enum DeepLink: Equatable, Sendable {
         case "creator":
             guard let handle = parts.first?.lowercased(), Self.isHandle(handle) else { return nil }
             return .creator(handle: handle)
+        case "v":
+            guard parts.count == 1, let id = parts.first.flatMap(ShareLinks.normalizedVideoId) else { return nil }
+            return .video(id: id)
         default:
             return nil
         }

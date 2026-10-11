@@ -36,11 +36,13 @@ public struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { Task { await env.flushTelemetry() } }
         }
-        .onOpenURL { url in
-            if let link = DeepLink.parse(url, scheme: env.config.urlScheme) { router.handle(link) }
-            if case .search(let q)? = DeepLink.parse(url, scheme: env.config.urlScheme), !q.isEmpty {
-                env.explore.query = q
-            }
+        // Custom-scheme links, and universal links when SwiftUI delivers them
+        // as a URL. Both paths route through AppRouter.open, and routing a
+        // shared video replaces Home's stack, so a link seen by both
+        // handlers still opens one screen.
+        .onOpenURL { url in _ = env.open(url) }
+        .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+            if let url = activity.webpageURL { _ = env.open(url) }
         }
         .sheet(item: $router.sheet) { sheet in
             switch sheet {
@@ -142,6 +144,8 @@ public struct RootView: View {
             .safeAreaPadding(.bottom, DripSize.tabBar)
         case .feed(let seed):
             SeededFeedScreen(env: env, seed: seed)
+        case .sharedVideo(let videoId):
+            SharedVideoScreen(env: env, videoId: videoId)
         }
     }
 }
@@ -186,6 +190,47 @@ struct SeededFeedScreen: View {
             await m.seed(items: seed.items, startAt: seed.startIndex, exhausted: seed.source == .saved)
             model = m
         }
+    }
+}
+
+/// A feed opened on one shared video (drip://v/<id>, https://<site>/v/<id>):
+/// loads it by id, then renders the seeded feed like SeededFeedScreen.
+struct SharedVideoScreen: View {
+    let env: AppEnvironment
+    @State private var model: SharedVideoModel
+
+    init(env: AppEnvironment, videoId: String) {
+        self.env = env
+        self._model = State(initialValue: env.sharedVideoModel(videoId))
+    }
+
+    var body: some View {
+        Group {
+            switch model.phase {
+            case .idle, .loading:
+                LoadingStateView("Opening the video").environment(\.colorScheme, .dark)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            case .loaded:
+                if let feed = model.feed {
+                    FeedView(model: feed, commerce: env.commerce, shareBaseURL: env.config.apiBaseURL,
+                             onOpenCreator: { env.router.push(.creator($0)) })
+                }
+            case .unavailable:
+                EmptyStateView("This one's gone.",
+                               message: "It may have sold out or been taken down. There's plenty more in your feed.",
+                               systemImage: "play.slash", actionTitle: "Back to the feed") {
+                    env.router.popToRoot(.home)
+                }
+                .background(DripColor.cream)
+            case .failed(let message):
+                ErrorStateView(message: message) { Task { await model.load() } }
+                    .background(DripColor.cream)
+            }
+        }
+        .ignoresSafeArea()
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .task { await model.load() }
     }
 }
 

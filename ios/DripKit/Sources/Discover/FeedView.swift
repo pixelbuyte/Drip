@@ -178,10 +178,10 @@ public struct FeedView: View {
             report: { reportTarget = item })
     }
 
-    /// The site root until the web serves per-video links (`/v/[videoId]`
-    /// is in the proxy matcher but has no route yet) — never share a 404.
+    /// `<site>/v/<videoId>`: the public per-video page, which unfurls with the
+    /// poster and opens the app at this video where universal links are set up.
     private func shareURL(for item: FeedItem) -> URL {
-        shareBaseURL
+        ShareLinks.videoURL(base: shareBaseURL, videoId: item.videoId)
     }
 
     private func syncPlayers() {
