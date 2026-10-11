@@ -6,28 +6,94 @@ import Analytics
 import Discover
 import Media
 
-/// A creator's storefront: their videos (the feed route's `seller_profile`
-/// surface) and the viewer's follow state.
+/// A creator's storefront: the public header (/api/creators/{handle}), their
+/// videos (the feed route's `seller_profile` surface) and the viewer's
+/// follow state.
 @MainActor
 @Observable
 public final class CreatorProfileModel {
     /// From a deep link only the handle is known; the full record (id,
-    /// name, avatar) is adopted from the first loaded video.
+    /// name, avatar) is adopted from the creator header, or from the first
+    /// loaded video if the header is unavailable.
     public private(set) var seller: Seller
+    /// The header: follower and live-video counts. `.empty` means the server
+    /// has no creator with this handle; `.failed` only costs the counts.
+    public private(set) var profile: Loadable<CreatorProfile> = .idle
     public let feed: FeedModel
+
+    private let api: APIClient
 
     public init(seller: Seller, api: APIClient, tracker: any EventTracking) {
         self.seller = seller
+        self.api = api
         self.feed = FeedModel(source: .feed(.sellerProfile, seller: seller.handle), api: api, tracker: tracker)
     }
 
     public var isFollowing: Bool { feed.following.contains(seller.id) }
 
+    public var followerCount: Int? { profile.value?.followerCount }
+    public var liveVideoCount: Int? { profile.value?.liveVideoCount }
+
+    /// The handle resolves to no creator at all (404), as opposed to a
+    /// creator with nothing posted yet.
+    public var isUnknownCreator: Bool {
+        if case .empty = profile { return true }
+        return false
+    }
+
+    /// Header and videos load concurrently; neither blocks or fails the other.
     public func load() async {
+        async let header: Void = loadProfileIfNeeded()
         await feed.loadInitial()
-        if let s = feed.items.first?.seller, s.handle.lowercased() == seller.handle.lowercased() {
-            seller = s
+        adoptSellerFromFeed()
+        await header
+    }
+
+    /// Retry / pull-to-refresh: both halves again.
+    public func reload() async {
+        async let header: Void = loadProfile()
+        await feed.reload()
+        adoptSellerFromFeed()
+        await header
+    }
+
+    private func loadProfileIfNeeded() async {
+        switch profile {
+        case .idle, .failed: await loadProfile()
+        case .loading, .loaded, .empty: return
         }
+    }
+
+    private func loadProfile() async {
+        let handle = seller.handle
+        guard CreatorHandle.normalize(handle) != nil else {
+            profile = .empty
+            return
+        }
+        profile = .loading
+        do {
+            let creator = try await api.send(DripAPI.creator(handle: handle)).creator
+            profile = .loaded(creator)
+            // The server's record is authoritative for identity.
+            if creator.handle.lowercased() == seller.handle.lowercased() {
+                seller = creator.seller
+            }
+        } catch APIError.notFound {
+            profile = .empty
+        } catch let error as APIError {
+            profile = .failed(message: error.userMessage)
+        } catch {
+            profile = .failed(message: "Could not load this creator.")
+        }
+    }
+
+    /// Pre-header behaviour, kept as the fallback: a deep-linked seller
+    /// (handle only) picks up id, name and avatar from their first video.
+    private func adoptSellerFromFeed() {
+        guard profile.value == nil,
+              let s = feed.items.first?.seller,
+              s.handle.lowercased() == seller.handle.lowercased() else { return }
+        seller = s
     }
 
     /// Follow events are keyed to a video (the event schema requires one);

@@ -82,6 +82,11 @@ public final class AppEnvironment {
         CreatorProfileModel(seller: seller, api: api, tracker: tracker)
     }
 
+    /// The feed an Explore category tile opens (surface `category`).
+    public func categoryFeed(_ category: CatalogCategory) -> FeedModel {
+        FeedModel(source: ExploreModel.feedSource(for: category), api: api, tracker: tracker)
+    }
+
     public func seededFeed(_ seed: FeedSeed) -> FeedModel {
         let source: FeedModel.Source
         switch seed.source {

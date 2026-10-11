@@ -80,7 +80,8 @@ public struct RootView: View {
             }
         case .discover:
             stack(.discover) {
-                ExploreView(model: env.explore) { items, index, q in
+                ExploreView(model: env.explore,
+                            onOpenCategory: { router.push(.category($0)) }) { items, index, q in
                     router.push(.feed(FeedSeed(items: items, startIndex: index, source: .search(q))))
                 }
                 .safeAreaPadding(.bottom, DripSize.tabBar)
@@ -142,6 +143,8 @@ public struct RootView: View {
             .safeAreaPadding(.bottom, DripSize.tabBar)
         case .feed(let seed):
             SeededFeedScreen(env: env, seed: seed)
+        case .category(let category):
+            CategoryFeedScreen(env: env, category: category)
         }
     }
 }
@@ -186,6 +189,31 @@ struct SeededFeedScreen: View {
             await m.seed(items: seed.items, startAt: seed.startIndex, exhausted: seed.source == .saved)
             model = m
         }
+    }
+}
+
+/// A category's feed (Explore tile). FeedView's own `.task` loads it.
+struct CategoryFeedScreen: View {
+    let env: AppEnvironment
+    let category: CatalogCategory
+    @State private var model: FeedModel
+
+    init(env: AppEnvironment, category: CatalogCategory) {
+        self.env = env
+        self.category = category
+        self._model = State(initialValue: env.categoryFeed(category))
+    }
+
+    var body: some View {
+        FeedView(model: model, commerce: env.commerce, shareBaseURL: env.config.apiBaseURL,
+                 emptyTitle: "Nothing in \(category.name) yet.",
+                 emptyMessage: "New drops land all day. Check back soon.",
+                 onOpenCreator: { env.router.push(.creator($0)) })
+            .ignoresSafeArea()
+            .navigationTitle(category.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 

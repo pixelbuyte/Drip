@@ -23,11 +23,14 @@ public struct CreatorProfileView: View {
                 switch model.feed.phase {
                 case .idle, .loading:
                     LoadingStateView().frame(height: 240)
+                case .empty where model.isUnknownCreator:
+                    EmptyStateView("Creator not found.", message: "There's no one called @\(model.seller.handle) on Drip.",
+                                   systemImage: "person.crop.circle.badge.questionmark").frame(height: 300)
                 case .empty:
                     EmptyStateView("No drops yet.", message: "When @\(model.seller.handle) posts, it lands here.",
                                    systemImage: "video").frame(height: 300)
                 case .failed(let m):
-                    ErrorStateView(message: m) { Task { await model.feed.reload() } }.frame(height: 300)
+                    ErrorStateView(message: m) { Task { await model.reload() } }.frame(height: 300)
                 case .loaded:
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: DripSpace.xs), count: 3),
                               spacing: DripSpace.xs) {
@@ -51,11 +54,34 @@ public struct CreatorProfileView: View {
             Text(model.seller.displayName).dripText(.title).foregroundStyle(DripColor.ink)
                 .accessibilityAddTraits(.isHeader)
             Text("@\(model.seller.handle)").dripText(.meta).foregroundStyle(DripColor.muted)
+            if let followers = model.followerCount, let videos = model.liveVideoCount {
+                HStack(spacing: DripSpace.xl) {
+                    CreatorStat(value: followers, singular: "follower", plural: "followers")
+                    CreatorStat(value: videos, singular: "drop", plural: "drops")
+                }
+            }
             if model.canFollow {
                 FollowButton(isFollowing: model.isFollowing) { Task { await model.toggleFollow() } }
             }
         }
         .padding(.top, DripSpace.l)
+    }
+}
+
+/// "12.4K followers": compact number over a muted label, read as one phrase.
+struct CreatorStat: View {
+    let value: Int
+    let singular: String
+    let plural: String
+
+    var body: some View {
+        let label = value == 1 ? singular : plural
+        VStack(spacing: 2) {
+            Text(CountFormat.compact(value)).dripText(.product).foregroundStyle(DripColor.ink)
+            Text(label).dripText(.meta).foregroundStyle(DripColor.muted)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(label)")
     }
 }
 
