@@ -44,7 +44,14 @@ function one<T>(v: T | T[] | null | undefined): T | null {
  */
 export async function loadFeedItemDetails(
   db: SupabaseClient,
-  videoIds: readonly string[]
+  videoIds: readonly string[],
+  /**
+   * `liveOnly` adds `status = 'live'` to the query. The feed and search
+   * callers already chose live ids; a shared link (`/v/[videoId]`,
+   * `GET /api/videos/[id]`) arrives with an arbitrary id and must not
+   * surface a processing or removed video.
+   */
+  opts: { liveOnly?: boolean } = {}
 ): Promise<Map<string, FeedItemDetails>> {
   const out = new Map<string, FeedItemDetails>();
   if (videoIds.length === 0) return out;
@@ -53,7 +60,7 @@ export async function loadFeedItemDetails(
   // instantiation depth (same issue slice.ts and pool.ts hit) — loosely
   // typed for the chain, cast back to FeedItemDetailsRow[] once below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query: any = db
+  let query: any = db
     .from('videos')
     .select(`
       id, mux_playback_id, duration_seconds, aspect_ratio, thumbnail_url, caption, hashtags,
@@ -64,6 +71,7 @@ export async function loadFeedItemDetails(
                    low_stock_threshold, images, variants, status ) )
     `)
     .in('id', videoIds);
+  if (opts.liveOnly) query = query.eq('status', 'live');
   const { data, error } = (await query) as {
     data: FeedItemDetailsRow[] | null;
     error: { message: string } | null;
