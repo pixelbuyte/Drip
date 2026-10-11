@@ -43,6 +43,8 @@ public enum AppRoute: Hashable, Sendable {
     case creator(Seller)
     /// A vertical feed opened on items another screen already holds.
     case feed(FeedSeed)
+    /// A category's feed, from an Explore tile; loads from the server.
+    case category(CatalogCategory)
 }
 
 public struct FeedSeed: Hashable, Sendable {

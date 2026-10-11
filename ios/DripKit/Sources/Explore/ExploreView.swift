@@ -10,13 +10,16 @@ import Discover
 public struct ExploreView: View {
     @Bindable var model: ExploreModel
     let suggestions: [String]
+    let onOpenCategory: (CatalogCategory) -> Void
     let onOpen: (_ items: [FeedItem], _ index: Int, _ query: String) -> Void
     @FocusState private var focused: Bool
 
     public init(model: ExploreModel, suggestions: [String] = ["Vintage", "Ceramics", "Denim", "Jewelry", "Skincare", "Home"],
+                onOpenCategory: @escaping (CatalogCategory) -> Void = { _ in },
                 onOpen: @escaping ([FeedItem], Int, String) -> Void) {
         self.model = model
         self.suggestions = suggestions
+        self.onOpenCategory = onOpenCategory
         self.onOpen = onOpen
     }
 
@@ -33,6 +36,7 @@ public struct ExploreView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(DripColor.cream)
+        .task { await model.loadCategories() }
     }
 
     private var searchField: some View {
@@ -67,6 +71,7 @@ public struct ExploreView: View {
                     Task { await model.submit() }
                 }
             }
+            categoriesSection
         case .loading:
             LoadingStateView("Searching").frame(height: 240)
         case .empty:
@@ -83,6 +88,66 @@ public struct ExploreView: View {
                 }
             }
         }
+    }
+
+    /// Browse by category: 2-up pastel tiles from /api/categories. Failure
+    /// is inline and small; search still works without it.
+    @ViewBuilder private var categoriesSection: some View {
+        switch model.categories {
+        case .idle, .empty:
+            EmptyView()
+        case .loading:
+            VStack(alignment: .leading, spacing: DripSpace.s) {
+                Text("Categories").dripText(.eyebrow).foregroundStyle(DripColor.muted)
+                LoadingStateView().frame(height: 120)
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: DripSpace.s) {
+                Text("Categories").dripText(.eyebrow).foregroundStyle(DripColor.muted)
+                ErrorStateView(message: message) { Task { await model.reloadCategories() } }
+                    .frame(height: 200)
+            }
+        case .loaded(let categories):
+            VStack(alignment: .leading, spacing: DripSpace.s) {
+                Text("Categories").dripText(.eyebrow).foregroundStyle(DripColor.muted)
+                    .accessibilityAddTraits(.isHeader)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: DripSpace.s), GridItem(.flexible())],
+                          spacing: DripSpace.s) {
+                    ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+                        Button { onOpenCategory(category) } label: {
+                            CategoryTile(name: category.name, tint: CategoryTile.tint(at: index))
+                        }
+                        .buttonStyle(PressableStyle())
+                        .accessibilityLabel(category.name)
+                        .accessibilityHint("Opens the \(category.name) feed")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One category: name in the lower-left of a rounded pastel block.
+struct CategoryTile: View {
+    let name: String
+    let tint: Color
+
+    /// The pastel set, cycled in server order so neighbours differ.
+    static func tint(at index: Int) -> Color {
+        let tints = [DripColor.peach, DripColor.lavender, DripColor.mint, DripColor.pink, DripColor.lime]
+        return tints[index % tints.count]
+    }
+
+    var body: some View {
+        Text(name)
+            .dripText(.product)
+            .foregroundStyle(DripColor.ink)
+            .multilineTextAlignment(.leading)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, minHeight: 84, alignment: .bottomLeading)
+            .padding(DripSpace.m)
+            .background(tint, in: RoundedRectangle(cornerRadius: DripRadius.tile, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: DripRadius.tile, style: .continuous))
     }
 }
 

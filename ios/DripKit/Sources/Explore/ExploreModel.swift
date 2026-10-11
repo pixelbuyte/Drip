@@ -2,10 +2,15 @@ import Foundation
 import Observation
 import DripModels
 import Networking
+import Discover
 
 /// Search: debounced queries against /api/search (which returns the feed
 /// shape, ranked by search_feed_videos). Stale responses never overwrite a
 /// newer query's results.
+///
+/// Browse: the category tiles shown while no query is active, from
+/// /api/categories. Tapping one opens that category's feed
+/// (`FeedModel.Source.feed(.category, category: slug)`).
 @MainActor
 @Observable
 public final class ExploreModel {
@@ -17,6 +22,7 @@ public final class ExploreModel {
     }
     public private(set) var results: Loadable<[FeedItem]> = .idle
     public private(set) var exhausted = false
+    public private(set) var categories: Loadable<[CatalogCategory]> = .idle
     public let sessionId: String
 
     private let api: APIClient
@@ -29,6 +35,41 @@ public final class ExploreModel {
     }
 
     public var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    // MARK: Categories
+
+    /// Loads the tiles once; later calls are no-ops unless the last attempt
+    /// failed (so the view's `.task` can call it on every appearance).
+    public func loadCategories() async {
+        switch categories {
+        case .loaded, .empty, .loading: return
+        case .idle, .failed: break
+        }
+        categories = .loading
+        do {
+            let list = try await api.send(DripAPI.categories()).categories
+            categories = list.isEmpty ? .empty : .loaded(list)
+        } catch let error as APIError {
+            categories = .failed(message: error.userMessage)
+        } catch {
+            categories = .failed(message: "Categories are unavailable right now.")
+        }
+    }
+
+    /// The feed a category tile opens: the server's `category` surface,
+    /// filtered by slug (src/app/api/feed/route.ts).
+    public nonisolated static func feedSource(for category: CatalogCategory) -> FeedModel.Source {
+        .feed(.category, category: category.slug)
+    }
+
+    /// Retry after a failure (the error state's button).
+    public func reloadCategories() async {
+        if categories.isLoading { return }
+        categories = .idle
+        await loadCategories()
+    }
+
+    // MARK: Search
 
     /// Runs now (keyboard "Search", a chip tap) instead of after the debounce.
     public func submit() async {
