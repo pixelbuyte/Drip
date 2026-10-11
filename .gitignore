@@ -50,3 +50,4 @@ ios/**/DerivedData/
 ios/build/
 *.ipa
 *.dSYM.zip
+ios/Config/Local.xcconfig

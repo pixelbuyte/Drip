@@ -1,0 +1,6 @@
+// Copy to Local.xcconfig (gitignored) for local runs. Public values only.
+DRIP_TEAM_ID = ABCDE12345
+DRIP_API_BASE_URL = https:$(SLASH)$(SLASH)your-drip-deployment.vercel.app
+DRIP_SUPABASE_URL = https:$(SLASH)$(SLASH)your-project.supabase.co
+DRIP_SUPABASE_ANON_KEY = sb_publishable_...
+DRIP_STRIPE_PUBLISHABLE_KEY = pk_test_...

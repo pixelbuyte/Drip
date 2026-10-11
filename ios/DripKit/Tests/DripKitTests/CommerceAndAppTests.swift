@@ -264,7 +264,7 @@ final class DesignTokenTests: XCTestCase {
     func testCompactCounts() {
         // SocialActionButton.compact lives in the SwiftUI layer; the format is
         // pinned here through the same arithmetic on platforms with SwiftUI.
-        #if canImport(SwiftUI)
+        #if canImport(UIKit)
         XCTAssertEqual(SocialActionButton.compact(12_400), "12.4K")
         XCTAssertEqual(SocialActionButton.compact(328), "328")
         #endif

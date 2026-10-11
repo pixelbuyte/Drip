@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sign in with Apple (guideline 4.8: required alongside Google sign-in). -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+	<!-- Apple Pay through Stripe. The App ID must have this merchant ID. -->
+	<key>com.apple.developer.in-app-payments</key>
+	<array>
+		<string>$(DRIP_APPLE_MERCHANT_ID)</string>
+	</array>
+</dict>
+</plist>
