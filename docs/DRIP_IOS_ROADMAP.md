@@ -18,15 +18,15 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 | `native-ios` branch from the verified base | `astra-drip` (`9e0aa04`) = `main` + 2 design-only commits, 0 behind |
 
 ## Milestone 2 — Native SwiftUI project that compiles in Codemagic
-**Status: In progress.** The project exists and compiles in parts; the full iOS compile is being driven to green on GitHub Actions. The Codemagic build itself is **blocked on credentials and your approval** to spend minutes.
+**Status: Complete on GitHub Actions; Codemagic run blocked.** The whole app (every module, plus Stripe) compiles for iOS, and all 60 tests pass on the iOS Simulator: [run 38101069030](https://github.com/pixelbuyte/Drip/actions/runs/38101069030), commit `705aa39`. The Codemagic build itself is **blocked on credentials and your approval** to spend minutes.
 
 | Item | Status | Evidence |
 |---|---|---|
 | 13 SwiftPM modules + app target (XcodeGen) | Done | `ios/DripKit/Package.swift`, `ios/project.yml` |
 | Non-UI code compiles under Swift 6.2 strict concurrency, no warnings (Linux) | Done | `swift build` locally; the GitHub Actions "DripKit tests (Linux)" job |
-| 60 unit tests pass on Linux and macOS | Done | GitHub Actions runs 5–7, "DripKit tests (macOS host)" step |
-| Every SwiftUI screen compiles for iOS | **In progress.** Each run surfaces the next compile error (missing SwiftUI import, then an undeclared module import); both are fixed and an import-graph check was added | GitHub Actions "iOS build + simulator tests" job |
-| Unsigned Release device build of the app, with Stripe | Not yet reached | same job, final step |
+| 60 unit tests pass on Linux, macOS and the iOS Simulator | Done | [run 38101069030](https://github.com/pixelbuyte/Drip/actions/runs/38101069030): `Executed 60 tests, with 0 failures`, `** TEST SUCCEEDED **` |
+| Every SwiftUI screen compiles for iOS | Done | same run, simulator test step (the test build compiles every module) |
+| Unsigned Release device build of the app, with Stripe | Done | same run, "Build app (unsigned, device, Release)": `** BUILD SUCCEEDED **` |
 | `codemagic.yaml`, four workflows, manual-only | Done (config) | `codemagic.yaml` |
 | First Codemagic build | **Blocked:** needs a Codemagic API token and your approval | DRIP_CODEMAGIC_SETUP.md §5 |
 
