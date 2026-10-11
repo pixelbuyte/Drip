@@ -106,7 +106,8 @@ workflows:
           set -o pipefail
           UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone")))')
           cd ios/DripKit
-          xcodebuild test -scheme DripKit-Package \
+          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; s=json.load(sys.stdin)["workspace"]["schemes"]; print(next((x for x in s if x.endswith("-Package")), s[0]))')
+          xcodebuild test -scheme "$SCHEME" \
             -destination "id=$UDID" \
             -resultBundlePath "$CM_BUILD_DIR/dripkit.xcresult" | xcpretty
       - name: Unsigned Release build (device)

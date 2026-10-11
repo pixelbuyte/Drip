@@ -1,6 +1,7 @@
 #if canImport(AVFoundation) && canImport(UIKit)
 import AVFoundation
 import UIKit
+import SwiftUI
 import Observation
 
 /// Owns every AVPlayer the feed uses and executes `PreloadPlanner` plans.

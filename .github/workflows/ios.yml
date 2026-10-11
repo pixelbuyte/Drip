@@ -55,13 +55,17 @@ jobs:
       - name: DripKit tests (iOS Simulator — compiles every SwiftUI screen)
         working-directory: ios/DripKit
         run: |
-          set -o pipefail
-          xcodebuild test \
-            -scheme DripKit-Package \
+          # The package's scheme name depends on its product count; ask
+          # xcodebuild instead of guessing. Prefer the all-targets scheme.
+          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; s=json.load(sys.stdin)["workspace"]["schemes"]; print(next((x for x in s if x.endswith("-Package")), s[0]))')
+          echo "Scheme: $SCHEME"
+          # Exit status comes from xcodebuild itself, never from a filter.
+          status=0
+          xcodebuild test -scheme "$SCHEME" \
             -destination "id=${{ steps.sim.outputs.udid }}" \
-            -skipPackagePluginValidation \
-            | tee ../../dripkit-ios-test.log | grep -E "error:|warning: .*DripKit|Test Suite|Executed|\*\* " || true
-          test "${PIPESTATUS[0]}" -eq 0
+            -skipPackagePluginValidation > ../../dripkit-ios-test.log 2>&1 || status=$?
+          grep -E "error:|Test Suite '.*(passed|failed)|Executed|\*\* " ../../dripkit-ios-test.log | tail -60 || true
+          exit $status
 
       - name: Generate Xcode project
         working-directory: ios
@@ -70,14 +74,14 @@ jobs:
       - name: Build app (unsigned, device, Release)
         working-directory: ios
         run: |
-          set -o pipefail
+          status=0
           xcodebuild build \
             -project Drip.xcodeproj -scheme Drip -configuration Release \
             -destination 'generic/platform=iOS' \
             -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            | tee ../app-build.log | grep -E "error:|\*\* " || true
-          test "${PIPESTATUS[0]}" -eq 0
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO > ../app-build.log 2>&1 || status=$?
+          grep -E "error:|\*\* " ../app-build.log | tail -60 || true
+          exit $status
 
       - name: Upload logs
         if: always()

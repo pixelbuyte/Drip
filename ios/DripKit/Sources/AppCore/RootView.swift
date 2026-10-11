@@ -89,8 +89,13 @@ public struct RootView: View {
             stack(.drop) {
                 if env.isSignedIn {
                     StudioView(model: env.studio) { url in
-                        Task { _ = try? await webAuth.start(url: url, callbackScheme: env.config.urlScheme) }
-                        Task { await env.studio.refreshOnboarding() }
+                        // Stripe's return_url is the website (start/route.ts),
+                        // so the session ends when the seller closes it; only
+                        // then is the account state worth re-reading.
+                        Task {
+                            _ = try? await webAuth.start(url: url, callbackScheme: env.config.urlScheme)
+                            await env.studio.refreshOnboarding()
+                        }
                     }
                     .safeAreaPadding(.bottom, DripSize.tabBar)
                 } else {
