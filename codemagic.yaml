@@ -5,7 +5,7 @@
 # Free compile/test checks run on GitHub Actions (.github/workflows/ios.yml).
 #
 # Credentials are never in this file or the repo. They live in Codemagic:
-#   - Team integration "Drip App Store Connect" (App Store Connect API key:
+#   - Team integration "codemagic1" (App Store Connect API key:
 #     issuer id, key id, .p8) — used for signing-file fetch and TestFlight.
 #   - Environment variable group `drip_public_config` — PUBLIC values only:
 #       DRIP_API_BASE_URL, DRIP_SUPABASE_URL, DRIP_SUPABASE_ANON_KEY,
@@ -135,7 +135,7 @@ workflows:
     <<: *instance
     max_build_duration: 60
     integrations:
-      app_store_connect: Drip App Store Connect
+      app_store_connect: codemagic1
     environment:
       <<: *environment_base
       groups:
@@ -167,7 +167,7 @@ workflows:
     <<: *instance
     max_build_duration: 75
     integrations:
-      app_store_connect: Drip App Store Connect
+      app_store_connect: codemagic1
     environment:
       <<: *environment_base
       groups:
@@ -208,7 +208,7 @@ workflows:
     <<: *instance
     max_build_duration: 90
     integrations:
-      app_store_connect: Drip App Store Connect
+      app_store_connect: codemagic1
     environment:
       <<: *environment_base
       groups:

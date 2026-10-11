@@ -23,7 +23,7 @@ None of these are in the repo; they live in Codemagic.
 ### 1a. App Store Connect API key (Required, you)
 1. In App Store Connect → Users and Access → Integrations → App Store Connect API, create a **Team key** with the **App Manager** role.
 2. Download the `.p8` (it can be downloaded once) and note the **Issuer ID** and **Key ID**.
-3. In Codemagic → Team settings → Integrations → **Developer Portal**, add a key named exactly **`Drip App Store Connect`**. The workflows reference that name.
+3. In Codemagic → Team settings → Integrations → **Developer Portal**, use the App Store Connect key named **`codemagic1`** (key ID YCNX76TT2M). The workflows reference that name; if you rename the key, update `app_store_connect:` in `codemagic.yaml`.
 4. Codemagic stores the `.p8` encrypted. It is never printed, and nothing in `codemagic.yaml` echoes it.
 
 ### 1b. Codemagic API token (Required, you)
