@@ -128,8 +128,11 @@ export async function getFeedSlice(
   const items: FeedItem[] = [];
   let oldestSeen: string | null = null;
   for (const v of data ?? []) {
-    oldestSeen = v.published_at;
+    // Check the limit BEFORE advancing the cursor: the row that trips it is
+    // not served, so it must stay above the next page's `published_at <
+    // cursor` bound. Advancing first skipped one video on every page.
     if (items.length >= limit) break;
+    oldestSeen = v.published_at;
     if (blockedSellers.has(v.seller_id)) continue;
     if (!v.profiles) continue;
 

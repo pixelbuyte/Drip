@@ -82,7 +82,7 @@ final class CheckoutModelTests: XCTestCase {
         XCTAssertEqual(pay.presented.first?.clientSecret, "pi_1_secret_x")
         await m.close()
         let kinds = await tracker.kinds
-        XCTAssertEqual(kinds, [.checkoutOpen, .purchase], "no abandon after a purchase")
+        XCTAssertEqual(kinds, [.checkoutOpen], "no abandon after a purchase, and no client-asserted purchase event")
     }
 
     func testSoldOutIsItsOwnState() async throws {

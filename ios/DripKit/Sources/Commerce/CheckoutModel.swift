@@ -99,10 +99,9 @@ public final class CheckoutModel {
         case .completed:
             phase = .succeeded(intent)
             finished = true
-            // The order itself is created by the Stripe webhook, not by this
-            // event — the event only feeds ranking.
-            await tracker.track(FeedEvent(.purchase, videoId: videoId, productId: selection.product.id),
-                                sessionId: sessionId, surface: surface)
+            // Deliberately no `purchase` event: a client-asserted purchase is
+            // forgeable and inflates ranking signals. The Stripe webhook is
+            // the only authority that a purchase happened.
         case .canceled:
             phase = .ready(intent)
         case .failed(let message):
