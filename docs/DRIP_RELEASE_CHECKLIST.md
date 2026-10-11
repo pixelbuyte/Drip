@@ -9,10 +9,10 @@ How to use it:
 - [ ] Migration chain `00006`–`00017` applied to production, following `docs/production-migration/PREFLIGHT.md` (PITR on, fresh snapshot taken, rollback rehearsed). **Status today: not applied; PREFLIGHT says "NOT READY".**
 - [ ] Production RLS re-checked after the migration: there must be no `orders_insert_for_seller`, `orders_seller_update_own` or `seller_payments_self_update` (audit A §0.4).
 - [ ] Videos/products creation endpoint and Mux webhook support for `videos`, so creator uploads reach the feed.
-- [ ] Account deletion endpoint (App Store 5.1.1(v)) and an in-app entry point.
+- [ ] Account deletion endpoint (App Store 5.1.1(v)) and an in-app entry point. **Status today: built and tested (`DELETE /api/me`, Profile → Delete account); verify on device. Define the support process for sellers with buyer orders (they get a 409).**
 - [ ] Stripe webhook: idempotent inventory decrement; refund and dispute handling.
-- [ ] `EASYPOST_WEBHOOK_SECRET` set; otherwise that webhook fails open (audit C §4.1).
-- [ ] `/auth/callback` open redirect fixed (audit C §4.2).
+- [ ] `EASYPOST_WEBHOOK_SECRET` set. Without it, the webhook now returns 503 (fail-closed) and tracking updates stop (audit C §4.1).
+- [x] `/auth/callback` open redirect fixed (audit C §4.2): `security-fixes.test.ts`.
 - [ ] All server secrets present in the Vercel production project (see §6).
 
 ## 2. App configuration
@@ -57,7 +57,7 @@ How to use it:
   - demo account credentials;
   - how to reach a product and check out in test mode.
 - [ ] Sign in with Apple offered alongside Google (4.8). **Status today: implemented.**
-- [ ] In-app account deletion (5.1.1(v)). **Status today: missing (backend).**
+- [ ] In-app account deletion (5.1.1(v)). **Status today: built (Profile → Delete account → confirm); verify on device.**
 - [ ] User-generated content (4.2/1.2): report and "not interested" present; a moderation process documented; block or hide a creator. **Status today: report + not interested implemented; seller block is 30 days via `not_interested`.**
 - [ ] Export compliance: `ITSAppUsesNonExemptEncryption = NO` (HTTPS only). **Status today: set.**
 - [ ] Screenshots (6.9" and 6.5"), description, keywords, support URL, privacy policy URL (`/legal/privacy`).

@@ -69,7 +69,7 @@
 
 ## Since the audit: what `native-ios` has already changed
 
-All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 886 passing tests.
+All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 904 passing tests.
 
 | Change | Files | Evidence |
 |---|---|---|
@@ -81,15 +81,18 @@ All changes are backward-compatible with the web app, tested, and pushed on PR #
 | Feed cursor no longer skips one video per page (finding C-4.14) | `src/lib/feed/slice.ts` | `slice.test.ts` fails on the old code and passes on the new |
 | Like no longer clears save, and vice versa (finding C-4.15 / A-0.5) | `supabase/migrations/00017_reactions_no_clobber.sql` | the function is re-created byte-for-byte except the reactions block; seven batch sequences executed against PostgreSQL 16 |
 | The native client never emits a client-asserted `purchase` event (finding C-4.5) | `ios/DripKit/Sources/Commerce/CheckoutModel.swift` | Swift test |
+| `/auth/callback` only redirects to same-site paths (finding C-4.2) | `src/lib/safe-redirect.ts`, `src/app/auth/callback/route.ts` | `security-fixes.test.ts`: `https://evil`, `//evil`, `/\evil`, control-character tricks all fall back |
+| EasyPost webhook fails closed (503) when `EASYPOST_WEBHOOK_SECRET` is unset, and never verifies against an empty key (finding C-4.1) | `src/app/api/webhooks/easypost/route.ts`, `src/lib/easypost.ts` | `security-fixes.test.ts` |
+| Account deletion: `DELETE /api/me` (cookie or Bearer) plus an in-app entry point. Sellers with buyer orders get a 409, because `orders.seller_id` cascades from `profiles` and deletion would destroy those orders | `src/lib/account-deletion.ts`, `src/app/api/me/route.ts`, `ios/DripKit/Sources/Profile/*` | `account-deletion.test.ts`; `AccountDeletionTests` (Swift) |
 
 ### Still open, and needing a decision or credentials (Proposed order)
 1. **Production migration.** Apply the `00006`–`00017` chain to production once `PREFLIGHT.md`'s blockers (PITR, fresh snapshot) are cleared. This one step fixes the security holes in §3 and makes the feed real. **Owner decision; cannot be done from this session.**
 2. **Videos-model creation endpoint.** Add a `videos`/`products` creation endpoint and Mux webhook handling for `videos`, so creator uploads reach the feed (Part A §0.3).
 3. **Native checkout prerequisites.** Collect the buyer email (the native app already sends it), set the shipping address before confirm (the native app collects it via Stripe's address element), and make the stock decrement idempotent.
-4. **Account deletion endpoint** (App Store blocker).
+4. ~~Account deletion endpoint~~ Done (see above). Closing a seller account that has buyer orders is a support process.
 5. **Comments** (table, RLS, routes) if comments are a launch feature.
-6. **EasyPost webhook secret.** It must be set, or that webhook fails open (C-4.1).
-7. **Auth callback.** Fix the open redirect in `/auth/callback` (C-4.2).
+6. **EasyPost webhook secret.** Must be set. The webhook now fails closed without it (503; EasyPost retries), so tracking updates stop rather than being forgeable (C-4.1).
+7. ~~Auth callback open redirect~~ Fixed (C-4.2).
 
 ---
 

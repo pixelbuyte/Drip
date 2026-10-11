@@ -160,4 +160,35 @@ public final class ProfileModel {
     public func signOut() async {
         await session.signOut()
     }
+
+    // MARK: Account deletion (App Store 5.1.1(v))
+
+    public enum Deletion: Equatable, Sendable {
+        case idle, working
+        /// Refused or failed; the account still exists.
+        case failed(String)
+    }
+
+    public private(set) var deletion: Deletion = .idle
+
+    /// Deletes the account server-side, then drops the local session. On any
+    /// failure the user stays signed in and sees why.
+    public func deleteAccount() async {
+        guard deletion != .working else { return }
+        deletion = .working
+        do {
+            _ = try await api.send(DripAPI.deleteAccount())
+            deletion = .idle
+            saved = .idle
+            await session.signOut()
+        } catch let e as APIError {
+            deletion = .failed(e.userMessage)
+        } catch {
+            deletion = .failed("Could not delete your account. Try again.")
+        }
+    }
+
+    public func dismissDeletionError() {
+        if case .failed = deletion { deletion = .idle }
+    }
 }

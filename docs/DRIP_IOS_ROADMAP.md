@@ -60,13 +60,13 @@ _Last updated by the `native-ios` session; branch `native-ios`, PR #14._
 | Studio: payouts gate + drop creation + Mux upload | Built against existing routes | **Blocked:** `/api/drops` writes legacy `drops`; the feed reads `videos`. Needs a videos-model creation endpoint and Mux webhook support (DRIP_BACKEND_INTEGRATION.md §5 #2) |
 | Comments | Not built | No backend (§5 #3) |
 | Buyer order history | Not built | No backend (§5 #5) |
-| Account deletion | Not built | No backend; **App Store blocker** (§5 #4) |
+| Account deletion | Built + tested (app + API) | `DELETE /api/me`; Profile → Delete account. A seller with buyer orders is refused (409) and needs a support process |
 | Categories / Discover tiles | Not built | Needs `GET /api/categories` |
 
 **Proposed backend sequence for M4:**
 1. Apply the migration chain.
 2. Add a videos/products creation endpoint and the Mux webhook update.
-3. Account deletion.
+3. ~~Account deletion.~~ Done.
 4. Orders read.
 5. Comments.
 6. Categories.

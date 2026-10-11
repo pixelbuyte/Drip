@@ -84,6 +84,12 @@ public enum DripAPI {
         Endpoint(.get, "/api/me/saved", sendsViewerIdentity: true)
     }
 
+    /// DELETE /api/me — deletes the signed-in account (App Store 5.1.1(v)).
+    /// 409 `seller_has_orders`: a creator with buyer orders is closed by support.
+    public static func deleteAccount() -> Endpoint<AccountDeletedResponse> {
+        Endpoint(.delete, "/api/me", body: Data(#"{"confirm":"DELETE"}"#.utf8), auth: .required)
+    }
+
     // MARK: Commerce
 
     /// POST /api/checkout/intent — price, shipping, inventory and the Stripe
@@ -109,6 +115,11 @@ public enum DripAPI {
     public static func startOnboarding() -> Endpoint<OnboardingLink> {
         Endpoint(.post, "/api/stripe/onboarding/start", auth: .required)
     }
+}
+
+public struct AccountDeletedResponse: Codable, Sendable, Equatable {
+    public var deleted: Bool
+    public init(deleted: Bool) { self.deleted = deleted }
 }
 
 public struct SavedItemsResponse: Codable, Sendable, Equatable {

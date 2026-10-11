@@ -114,7 +114,7 @@ Response:
 | 1 | **Production runs the legacy schema**; chain 00006–00017 not applied | No feed content, no purchase path, live RLS holes | Apply the chain per `docs/production-migration/PREFLIGHT.md` after its blockers clear | audit A §0.1, §0.4 |
 | 2 | **No videos/products creation path**; Mux webhook only updates `drops` | Creator uploads never reach the feed | `POST /api/studio/videos` creating `products` + `videos` + `video_products` with a Mux upload (passthrough = video id); Mux webhook sets `videos.mux_playback_id`/`status` | audit A §0.3 |
 | 3 | **No comments backend** | Comments omitted from the native UI | `comments` table + RLS + `GET/POST /api/videos/{id}/comments` + moderation/report | audit C §3 |
-| 4 | **No account deletion** | App Store rejection (5.1.1(v)) | `POST /api/me/delete`: delete the auth user and anonymise or keep orders per legal | audit C §3 |
+| 4 | ~~No account deletion~~ **Built:** `DELETE /api/me` with body `{"confirm":"DELETE"}` | App Store 5.1.1(v) | Deletes the auth user, which cascades to the profile and listings. Orders the user placed as a buyer stay with the seller, with `buyer_viewer_id` set to NULL. A seller with buyer orders gets a 409 `seller_has_orders`, to be closed by support (otherwise the cascade would delete those orders) | `src/lib/account-deletion.ts` |
 | 5 | **No buyer order history** | Profile has no "Orders" | `GET /api/me/orders` by `buyer_anon_id` and/or user | audit C §3 |
 | 6 | **No categories endpoint** | Discover can't show category tiles | `GET /api/categories` (public read) | DRIP_SCREEN_INVENTORY.md |
 | 7 | **No per-video share route** | Share links go to the site root | `/v/[videoId]` page + `apple-app-site-association` | `src/proxy.ts` matcher lists `/v/*` with no route |

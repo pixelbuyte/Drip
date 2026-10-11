@@ -200,6 +200,20 @@ public struct ProfileView: View {
                     Button("Sign out", role: .destructive) { Task { await model.signOut() } }
                 }
                 .listRowBackground(DripColor.cream)
+
+                Section {
+                    Button(role: .destructive) { confirmingDelete = true } label: {
+                        if model.deletion == .working {
+                            HStack { Text("Deleting account…"); Spacer(); ProgressView() }
+                        } else {
+                            Text("Delete account")
+                        }
+                    }
+                    .disabled(model.deletion == .working)
+                } footer: {
+                    Text("Removes your account, profile and listings. Orders you've placed stay with the seller so they can be shipped and refunded.")
+                }
+                .listRowBackground(DripColor.cream)
             }
         }
         .listStyle(.insetGrouped)
@@ -208,6 +222,29 @@ public struct ProfileView: View {
         .task { await model.loadSaved() }
         .task { await model.observeSession() }
         .refreshable { await model.loadSaved() }
+        .confirmationDialog("Delete your Drip account?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete account", role: .destructive) { Task { await model.deleteAccount() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This can't be undone.")
+        }
+        .alert("Account not deleted", isPresented: deletionFailed) {
+            Button("OK") { model.dismissDeletionError() }
+        } message: {
+            Text(deletionMessage)
+        }
+    }
+
+    @State private var confirmingDelete = false
+
+    private var deletionMessage: String {
+        if case .failed(let message) = model.deletion { return message }
+        return ""
+    }
+
+    private var deletionFailed: Binding<Bool> {
+        Binding(get: { !deletionMessage.isEmpty },
+                set: { if !$0 { model.dismissDeletionError() } })
     }
 
     @ViewBuilder private var savedContent: some View {

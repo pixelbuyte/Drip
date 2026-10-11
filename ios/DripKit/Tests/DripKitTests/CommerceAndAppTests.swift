@@ -6,6 +6,8 @@ import DesignSystem
 import Products
 @testable import Commerce
 import Creators
+import Profile
+import Authentication
 @testable import AppCore
 import TestSupport
 
@@ -273,5 +275,50 @@ final class DesignTokenTests: XCTestCase {
         XCTAssertEqual(CountFormat.compact(3_000_000), "3M")
         XCTAssertEqual(CountFormat.compact(1_250_000), "1.2M")
         XCTAssertEqual(CountFormat.compact(-4), "0")
+    }
+}
+
+@MainActor
+final class AccountDeletionTests: XCTestCase {
+    let project = URL(string: "https://proj.supabase.co")!
+    let token = #"{"access_token":"A1","refresh_token":"R1","expires_in":3600,"token_type":"bearer","user":{"id":"u1","email":"a@b.co"}}"#
+
+    private func signedIn(_ t: StubTransport) async throws -> (ProfileModel, SessionStore) {
+        t.onJSON("/auth/v1/token", token)
+        t.onJSON("/auth/v1/logout", status: 204, "")
+        let s = SessionStore(client: SupabaseAuthClient(projectURL: project, anonKey: "anon", transport: t),
+                             store: InMemorySecureStore())
+        try await s.signIn(email: "a@b.co", password: "pw")
+        let api = APIClient(baseURL: URL(string: "https://drip.test")!, transport: t, tokens: s)
+        return (ProfileModel(session: s, api: api), s)
+    }
+
+    func testDeletesThenSignsOut() async throws {
+        let t = StubTransport()
+        t.onJSON("/api/me", method: .delete, #"{"deleted":true}"#)
+        let (m, s) = try await signedIn(t)
+        await m.deleteAccount()
+
+        let req = try XCTUnwrap(t.requests(to: "/api/me").first)
+        XCTAssertEqual(req.method, .delete)
+        XCTAssertEqual(req.headers["Authorization"], "Bearer A1")
+        XCTAssertEqual(req.jsonBody["confirm"] as? String, "DELETE")
+        XCTAssertEqual(m.deletion, .idle)
+        let state = await s.state
+        XCTAssertEqual(state, .signedOut)
+    }
+
+    func testSellerWithOrdersStaysSignedInAndSeesWhy() async throws {
+        let t = StubTransport()
+        t.onJSON("/api/me", method: .delete, status: 409,
+                 #"{"error":"This account has orders from buyers.","code":"seller_has_orders"}"#)
+        let (m, s) = try await signedIn(t)
+        await m.deleteAccount()
+
+        XCTAssertEqual(m.deletion, .failed("This account has orders from buyers."))
+        let state = await s.state
+        XCTAssertEqual(state, .signedIn(AuthUser(id: "u1", email: "a@b.co")))
+        m.dismissDeletionError()
+        XCTAssertEqual(m.deletion, .idle)
     }
 }
