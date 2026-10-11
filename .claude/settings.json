@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "ListAgents",
+      "mcp__Vercel__get_project",
+      "mcp__Vercel__list_deployments",
+      "mcp__Vercel__list_teams",
+      "mcp__Vercel__list_projects",
+      "mcp__Vercel__list_project_domains",
+      "mcp__github__list_branches",
+      "mcp__github__get_file_contents",
+      "mcp__github__search_repositories",
+      "mcp__Supabase__list_projects",
+      "mcp__Supabase__get_project_url",
+      "mcp__Supabase__get_publishable_keys"
+    ]
+  }
+}
