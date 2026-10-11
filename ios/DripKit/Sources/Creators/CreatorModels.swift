@@ -11,7 +11,9 @@ import Media
 @MainActor
 @Observable
 public final class CreatorProfileModel {
-    public let seller: Seller
+    /// From a deep link only the handle is known; the full record (id,
+    /// name, avatar) is adopted from the first loaded video.
+    public private(set) var seller: Seller
     public let feed: FeedModel
 
     public init(seller: Seller, api: APIClient, tracker: any EventTracking) {
@@ -21,7 +23,12 @@ public final class CreatorProfileModel {
 
     public var isFollowing: Bool { feed.following.contains(seller.id) }
 
-    public func load() async { await feed.loadInitial() }
+    public func load() async {
+        await feed.loadInitial()
+        if let s = feed.items.first?.seller, s.handle.lowercased() == seller.handle.lowercased() {
+            seller = s
+        }
+    }
 
     /// Follow events are keyed to a video (the event schema requires one);
     /// use the creator's latest. With no videos there is nothing to follow from.

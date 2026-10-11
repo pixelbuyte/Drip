@@ -51,7 +51,7 @@ let package = Package(
                                "Authentication", "Analytics"],
                 swiftSettings: strict),
 
-        .target(name: "TestSupport", dependencies: ["Networking", "Authentication"],
+        .target(name: "TestSupport", dependencies: ["DripModels", "Networking", "Authentication"],
                 path: "Tests/TestSupport"),
         .testTarget(name: "DripKitTests",
                     dependencies: ["AppCore", "TestSupport"],
