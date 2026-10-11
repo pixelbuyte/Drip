@@ -84,6 +84,12 @@ public enum DripAPI {
         Endpoint(.get, "/api/me/saved", sendsViewerIdentity: true)
     }
 
+    /// GET /api/me/orders — this device's purchases, plus every device linked
+    /// to the account when signed in.
+    public static func buyerOrders() -> Endpoint<BuyerOrdersResponse> {
+        Endpoint(.get, "/api/me/orders", auth: .optional, sendsViewerIdentity: true)
+    }
+
     /// DELETE /api/me — deletes the signed-in account (App Store 5.1.1(v)).
     /// 409 `seller_has_orders`: a creator with buyer orders is closed by support.
     public static func deleteAccount() -> Endpoint<AccountDeletedResponse> {

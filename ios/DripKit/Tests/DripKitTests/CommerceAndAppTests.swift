@@ -322,3 +322,55 @@ final class AccountDeletionTests: XCTestCase {
         XCTAssertEqual(m.deletion, .idle)
     }
 }
+
+@MainActor
+final class BuyerOrdersTests: XCTestCase {
+    let json = #"""
+    {"orders":[{"id":"o1","createdAt":"2026-10-01T00:00:00Z","status":"shipped","totalCents":8600,
+      "shippingCents":800,"trackingCode":"1Z999","seller":{"handle":"maya","displayName":"Maya Chen"},
+      "items":[{"title":"The Studio Tote","variant":"Chocolate","quantity":1,"unitPriceCents":7800,"imageUrl":"https://img.test/a.jpg"},
+               {"title":"Card Case","variant":null,"quantity":1,"unitPriceCents":0,"imageUrl":null}]},
+     {"id":"o2","createdAt":"2026-09-01T00:00:00Z","status":"refunded","totalCents":4600,"shippingCents":0,
+      "trackingCode":null,"seller":{"handle":"lee","displayName":null},"items":[]}]}
+    """#
+
+    func testDecodesAndLabels() throws {
+        let r = try JSONDecoder().decode(BuyerOrdersResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(r.orders.count, 2)
+        XCTAssertEqual(r.orders[0].summary, "The Studio Tote + 1 more")
+        XCTAssertEqual(r.orders[0].statusLabel, "On its way")
+        XCTAssertEqual(r.orders[0].total.formatted, "$86")
+        XCTAssertEqual(r.orders[0].sellerName, "Maya Chen")
+        XCTAssertEqual(r.orders[1].sellerName, "@lee")
+        XCTAssertEqual(r.orders[1].summary, "Order")
+        XCTAssertEqual(r.orders[1].statusLabel, "Refunded")
+    }
+
+    func testLoadsWithViewerIdentityAndOptionalAuth() async throws {
+        let t = StubTransport()
+        t.onJSON("/api/me/orders", json)
+        let api = APIClient(baseURL: URL(string: "https://drip.test")!, transport: t,
+                            tokens: FakeTokens(token: nil), viewer: FixedViewer())
+        let s = SessionStore(client: SupabaseAuthClient(projectURL: URL(string: "https://p.supabase.co")!,
+                                                        anonKey: "anon", transport: t),
+                             store: InMemorySecureStore())
+        let m = ProfileModel(session: s, api: api)
+        await m.loadOrders()
+        guard case .loaded(let orders) = m.orders else { return XCTFail("\(m.orders)") }
+        XCTAssertEqual(orders.map(\.id), ["o1", "o2"])
+        let req = try XCTUnwrap(t.requests(to: "/api/me/orders").first)
+        XCTAssertEqual(req.headers[APIClient.anonTokenHeader], FixedViewer().token)
+        XCTAssertNil(req.headers["Authorization"])   // guests see this device's orders
+    }
+
+    func testEmptyIsEmpty() async {
+        let t = StubTransport()
+        t.onJSON("/api/me/orders", #"{"orders":[]}"#)
+        let m = ProfileModel(session: SessionStore(client: SupabaseAuthClient(projectURL: URL(string: "https://p.supabase.co")!,
+                                                                              anonKey: "anon", transport: t),
+                                                   store: InMemorySecureStore()),
+                             api: APIClient(baseURL: URL(string: "https://drip.test")!, transport: t, viewer: FixedViewer()))
+        await m.loadOrders()
+        XCTAssertEqual(m.orders, .empty)
+    }
+}

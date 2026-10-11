@@ -69,7 +69,7 @@
 
 ## Since the audit: what `native-ios` has already changed
 
-All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 904 passing tests.
+All changes are backward-compatible with the web app, tested, and pushed on PR #14. The web test suite went from 866 to 910 passing tests.
 
 | Change | Files | Evidence |
 |---|---|---|
@@ -84,6 +84,7 @@ All changes are backward-compatible with the web app, tested, and pushed on PR #
 | `/auth/callback` only redirects to same-site paths (finding C-4.2) | `src/lib/safe-redirect.ts`, `src/app/auth/callback/route.ts` | `security-fixes.test.ts`: `https://evil`, `//evil`, `/\evil`, control-character tricks all fall back |
 | EasyPost webhook fails closed (503) when `EASYPOST_WEBHOOK_SECRET` is unset, and never verifies against an empty key (finding C-4.1) | `src/app/api/webhooks/easypost/route.ts`, `src/lib/easypost.ts` | `security-fixes.test.ts` |
 | Account deletion: `DELETE /api/me` (cookie or Bearer) plus an in-app entry point. Sellers with buyer orders get a 409, because `orders.seller_id` cascades from `profiles` and deletion would destroy those orders | `src/lib/account-deletion.ts`, `src/app/api/me/route.ts`, `ios/DripKit/Sources/Profile/*` | `account-deletion.test.ts`; `AccountDeletionTests` (Swift) |
+| Buyer order history: `GET /api/me/orders` (guest device + the account's linked devices; a device claimed by another account is excluded) | `src/lib/buyer-orders.ts`, `src/app/api/me/orders/route.ts`, Profile → Orders | `buyer-orders.test.ts`; `BuyerOrdersTests` (Swift) |
 
 ### Still open, and needing a decision or credentials (Proposed order)
 1. **Production migration.** Apply the `00006`–`00017` chain to production once `PREFLIGHT.md`'s blockers (PITR, fresh snapshot) are cleared. This one step fixes the security holes in §3 and makes the feed real. **Owner decision; cannot be done from this session.**

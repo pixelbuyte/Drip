@@ -157,8 +157,25 @@ public final class ProfileModel {
         }
     }
 
+    public private(set) var orders: Loadable<[BuyerOrder]> = .idle
+
+    public func loadOrders() async {
+        if case .loaded = orders {} else { orders = .loading }
+        do {
+            let r = try await api.send(DripAPI.buyerOrders())
+            orders = r.orders.isEmpty ? .empty : .loaded(r.orders)
+        } catch let e as APIError {
+            orders = .failed(message: e.userMessage)
+        } catch {
+            orders = .failed(message: "Could not load your orders.")
+        }
+    }
+
     public func signOut() async {
         await session.signOut()
+        // The device's own purchases stay visible; the account's other
+        // devices' orders go with the session.
+        await loadOrders()
     }
 
     // MARK: Account deletion (App Store 5.1.1(v))
@@ -180,7 +197,7 @@ public final class ProfileModel {
             _ = try await api.send(DripAPI.deleteAccount())
             deletion = .idle
             saved = .idle
-            await session.signOut()
+            await signOut()
         } catch let e as APIError {
             deletion = .failed(e.userMessage)
         } catch {

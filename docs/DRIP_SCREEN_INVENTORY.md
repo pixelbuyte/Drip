@@ -35,7 +35,7 @@ This document has two halves:
 | **Drop** (creator tools) | 29 | `Creators/CreatorViews.swift` (`StudioView`) | `GET /api/stripe/onboarding/status`, `POST /api/stripe/onboarding/start`, `POST /api/drops` + Mux direct upload | Built against the existing routes. **Blocked end-to-end:** `/api/drops` writes the legacy `drops` table, which the feed never reads (audit A §0.3) |
 | **Following** feed | 17 | `FeedView` with surface `following` | `GET /api/feed?surface=following` (now filtered server-side on `native-ios`) | Built. Empty state when following nobody |
 | **Creator profile** (pushed) | 16, 38 | `Creators/CreatorViews.swift` (`CreatorProfileView`) | `GET /api/feed?surface=seller_profile&seller=<handle>` | Built: header, follow, 3-up video grid. Bio, follower count and cover image need a profile endpoint |
-| **Profile**: account, saved, legal, sign out | 18, 19, 32 | `Profile/ProfileViews.swift` | `GET /api/me/saved`; Supabase Auth | Built, including account deletion (`DELETE /api/me`). **Orders and notifications are not built** (no backend) |
+| **Profile**: account, saved, legal, sign out | 18, 19, 32 | `Profile/ProfileViews.swift` | `GET /api/me/saved`; Supabase Auth | Built, including account deletion (`DELETE /api/me`) and order history (`GET /api/me/orders`). **Notifications are not built** (no backend) |
 | **Sign in** | — | `Profile/ProfileViews.swift` (`SignInView`) | Supabase Auth REST: Apple `id_token`, Google PKCE, password, email code; `POST /api/session/link` | Built. Needs Apple and Google providers configured in Supabase, plus the `drip://auth-callback` redirect allow-listed |
 | Misconfigured-build screen | — | `DripApp/Sources/DripApp.swift` | — | Built. Lists the missing or secret-looking config values without crashing |
 

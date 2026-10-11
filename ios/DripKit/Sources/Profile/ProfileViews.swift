@@ -187,6 +187,10 @@ public struct ProfileView: View {
                 savedContent.listRowBackground(DripColor.cream)
             }
 
+            Section("Orders") {
+                ordersContent.listRowBackground(DripColor.cream)
+            }
+
             Section("About") {
                 Link("Terms", destination: legalBaseURL.appendingPathComponent("legal/terms"))
                 Link("Privacy", destination: legalBaseURL.appendingPathComponent("legal/privacy"))
@@ -220,8 +224,13 @@ public struct ProfileView: View {
         .scrollContentBackground(.hidden)
         .background(DripColor.cream)
         .task { await model.loadSaved() }
+        .task { await model.loadOrders() }
         .task { await model.observeSession() }
-        .refreshable { await model.loadSaved() }
+        .refreshable {
+            async let saved: Void = model.loadSaved()
+            async let orders: Void = model.loadOrders()
+            _ = await (saved, orders)
+        }
         .confirmationDialog("Delete your Drip account?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete account", role: .destructive) { Task { await model.deleteAccount() } }
             Button("Cancel", role: .cancel) {}
@@ -247,6 +256,21 @@ public struct ProfileView: View {
                 set: { if !$0 { model.dismissDeletionError() } })
     }
 
+    @ViewBuilder private var ordersContent: some View {
+        switch model.orders {
+        case .idle, .loading:
+            ProgressView().frame(maxWidth: .infinity, minHeight: 60)
+        case .empty:
+            Text("Things you buy show up here, with where they are on the way to you.")
+                .dripText(.body).foregroundStyle(DripColor.muted)
+        case .failed(let m):
+            Button("\(m) Tap to retry.") { Task { await model.loadOrders() } }
+                .dripText(.body).foregroundStyle(DripColor.ink)
+        case .loaded(let orders):
+            ForEach(orders) { order in OrderRow(order: order) }
+        }
+    }
+
     @ViewBuilder private var savedContent: some View {
         switch model.saved {
         case .idle, .loading:
@@ -267,6 +291,31 @@ public struct ProfileView: View {
                 }
             }
         }
+    }
+}
+
+private struct OrderRow: View {
+    let order: BuyerOrder
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DripSpace.s) {
+            RemoteImage(order.items.first?.imageUrl)
+                .frame(width: DripSize.shelfThumb, height: DripSize.shelfThumb)
+                .clipShape(RoundedRectangle(cornerRadius: DripRadius.thumbnail))
+            VStack(alignment: .leading, spacing: DripSpace.xxs) {
+                Text(order.summary).dripText(.body).foregroundStyle(DripColor.ink).lineLimit(2)
+                Text("\(order.sellerName) · \(order.total.formatted)")
+                    .dripText(.meta).foregroundStyle(DripColor.muted)
+                Text(order.statusLabel).dripText(.meta).foregroundStyle(DripColor.ink)
+                if let tracking = order.trackingCode {
+                    Text("Tracking \(tracking)").dripText(.meta).foregroundStyle(DripColor.muted)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, DripSpace.xxs)
+        .accessibilityElement(children: .combine)
     }
 }
 #endif
