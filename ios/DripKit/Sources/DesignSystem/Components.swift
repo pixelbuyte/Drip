@@ -250,18 +250,8 @@ public struct SocialActionButton: View {
         }
     }
 
-    /// 12400 → "12.4K"
-    public static func compact(_ n: Int) -> String {
-        switch n {
-        case ..<1000: return "\(n)"
-        case ..<1_000_000:
-            let v = Double(n) / 1000
-            return v < 10 ? String(format: "%.1fK", v).replacingOccurrences(of: ".0K", with: "K") : "\(n / 1000)K"
-        default:
-            let v = Double(n) / 1_000_000
-            return String(format: "%.1fM", v).replacingOccurrences(of: ".0M", with: "M")
-        }
-    }
+    /// 12400 → "12.4K" (see `CountFormat`).
+    public static func compact(_ n: Int) -> String { CountFormat.compact(n) }
 }
 
 public struct DripChip: View {

@@ -123,3 +123,20 @@ public enum DripMotionSpec {
         (reduceMotion ? min(ms, reducedMotionMaxMs) : ms) / 1000
     }
 }
+
+/// Social counts as the design prints them (frame 40: "12.4K", "328").
+public enum CountFormat {
+    public static func compact(_ n: Int) -> String {
+        func oneDecimal(_ v: Double, _ suffix: String) -> String {
+            let s = String(format: "%.1f", (v * 10).rounded(.down) / 10)
+            return (s.hasSuffix(".0") ? String(s.dropLast(2)) : s) + suffix
+        }
+        switch max(n, 0) {
+        case ..<1_000: return "\(max(n, 0))"
+        case ..<100_000: return oneDecimal(Double(n) / 1_000, "K")
+        case ..<1_000_000: return "\(n / 1_000)K"
+        case ..<100_000_000: return oneDecimal(Double(n) / 1_000_000, "M")
+        default: return "\(n / 1_000_000)M"
+        }
+    }
+}
