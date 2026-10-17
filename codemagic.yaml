@@ -89,7 +89,10 @@ definitions:
       name: Signing files
       script: |
         keychain initialize
-        app-store-connect fetch-signing-files "$BUNDLE_ID" --type "$SIGNING_TYPE" --create
+        # CERTIFICATE_PRIVATE_KEY (secure, group drip_signing) lets Codemagic
+        # create the distribution certificate; without it no profile can be made.
+        app-store-connect fetch-signing-files "$BUNDLE_ID" --type "$SIGNING_TYPE" --create \
+          --certificate-key @env:CERTIFICATE_PRIVATE_KEY
         keychain add-certificates
         xcode-project use-profiles --project ios/Drip.xcodeproj
 
@@ -143,6 +146,7 @@ workflows:
       <<: *environment_base
       groups:
         - drip_public_config
+        - drip_signing
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
         SIGNING_TYPE: IOS_APP_STORE
@@ -174,6 +178,7 @@ workflows:
       <<: *environment_base
       groups:
         - drip_public_config
+        - drip_signing
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
         SIGNING_TYPE: IOS_APP_STORE
@@ -215,6 +220,7 @@ workflows:
       <<: *environment_base
       groups:
         - drip_public_config
+        - drip_signing
         - drip_release_guard
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
