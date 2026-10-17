@@ -40,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Swift / Xcode (native iOS app)
+ios/**/.build/
+ios/**/.swiftpm/
+ios/**/*.xcodeproj/
+ios/**/xcuserdata/
+ios/**/DerivedData/
+ios/build/
+*.ipa
+*.dSYM.zip
+ios/Config/Local.xcconfig

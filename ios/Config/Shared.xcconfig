@@ -1,0 +1,36 @@
+// Shared build settings for the Drip iOS app.
+//
+// Every DRIP_* value is PUBLIC (the same values ship to every browser as
+// NEXT_PUBLIC_*). Secrets never go in an xcconfig or the app: the Stripe
+// secret key, Supabase service-role key, Mux tokens and webhook secrets
+// stay in the Vercel project.
+//
+// Note: "//" starts a comment in xcconfig, so URLs are written with
+// $(SLASH) — https:$(SLASH)$(SLASH)host — or supplied by CI as build
+// settings on the xcodebuild command line, which is how Codemagic does it.
+
+SLASH = /
+
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+DRIP_BUNDLE_ID = com.pixelbuyte.drip
+DRIP_URL_SCHEME = drip
+DRIP_TEAM_ID =
+DRIP_APPLE_MERCHANT_ID = merchant.com.pixelbuyte.drip
+
+// Universal-links domain: the bare host of DRIP_API_BASE_URL (no scheme, no
+// path), e.g. drip.example.com — share links are built from the API base
+// URL, so the two must match. Feeds the applinks: entry in Drip.entitlements.
+// Codemagic derives it from DRIP_API_BASE_URL unless set explicitly.
+DRIP_ASSOCIATED_DOMAIN =
+
+// Placeholders so an unconfigured build compiles and then shows the
+// in-app "This build isn't configured" screen instead of crashing.
+DRIP_API_BASE_URL =
+DRIP_SUPABASE_URL =
+DRIP_SUPABASE_ANON_KEY =
+DRIP_STRIPE_PUBLISHABLE_KEY =
+
+// Developer-local overrides (gitignored): copy Local.xcconfig.example.
+#include? "Local.xcconfig"

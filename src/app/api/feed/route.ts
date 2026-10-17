@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
-import { ANON_COOKIE, verifyAnonId } from '@/lib/anon-id';
+import { resolveSignedAnonId } from '@/lib/anon-request';
 import { getFeedSliceRankedOrNaive, resolveCountryCode } from '@/lib/feed/ranked-slice';
 import { FEED_SLICE_SIZE, type FeedResponse, type FeedSurface } from '@/lib/feed/types';
 
@@ -34,9 +34,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Slow down a moment.' }, { status: 429 });
   }
 
-  const cookie = request.cookies.get(ANON_COOKIE)?.value;
   const anonId =
-    (cookie ? await verifyAnonId(cookie) : null) ??
+    (await resolveSignedAnonId(request)) ??
     request.headers.get('x-drip-anon-id');
 
   if (!anonId || !UUID_RE.test(anonId)) {

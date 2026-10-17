@@ -1,0 +1,84 @@
+# XcodeGen spec for the Drip iOS app. The .xcodeproj is generated, never
+# committed:  cd ios && xcodegen generate
+#
+# All app code lives in the DripKit Swift package (ios/DripKit); this target
+# is the thin shell: @main, the Stripe PaymentSheet adapter, resources.
+name: Drip
+options:
+  bundleIdPrefix: com.pixelbuyte
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+configFiles:
+  Debug: Config/Debug.xcconfig
+  Release: Config/Release.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: $(DRIP_TEAM_ID)
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  DripKit:
+    path: DripKit
+  Stripe:
+    url: https://github.com/stripe/stripe-ios-spm
+    majorVersion: 24.0.0
+
+targets:
+  Drip:
+    type: application
+    platform: iOS
+    sources:
+      - path: DripApp/Sources
+      - path: DripApp/Resources
+        buildPhase: resources
+      - path: DripApp/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      # SIL OFL 1.1 requires the licence to travel with the fonts.
+      - path: DripApp/Licenses
+        buildPhase: resources
+    dependencies:
+      - package: DripKit
+        product: AppCore
+      - package: Stripe
+        product: StripePaymentSheet
+    settings:
+      base:
+        PRODUCT_NAME: Drip
+        PRODUCT_BUNDLE_IDENTIFIER: $(DRIP_BUNDLE_ID)
+        INFOPLIST_FILE: DripApp/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: DripApp/Drip.entitlements
+        CODE_SIGN_STYLE: Manual
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+        Release:
+          SWIFT_COMPILATION_MODE: wholemodule
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+
+schemes:
+  Drip:
+    build:
+      targets:
+        Drip: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
