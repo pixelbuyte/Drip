@@ -57,7 +57,7 @@ None of these are in the repo; they live in Codemagic.
    - In Stripe → Settings → Payment methods → Apple Pay → iOS certificates, add a certificate. It generates the CSR.
    - Upload the CSR in the Apple Developer portal under the merchant ID.
 3. **App Store Connect app record** for bundle id `com.pixelbuyte.drip`. Put its numeric **Apple ID** into `APP_STORE_APPLE_ID` in `codemagic.yaml` (currently the placeholder `0000000000`).
-4. **Signing.** Certificates and profiles are created and fetched automatically by `app-store-connect fetch-signing-files --create`, using the API key from 1a. No `.p12` needs to be uploaded by hand. Assumption to confirm: the first `ios-signed-dev` run creates a development certificate.
+4. **Signed validation.** `ios-signed-dev` reuses the uploaded production identity named `Both` and the Drip App Store profile referenced as `drip_app_store_validation` in Codemagic Code signing identities. The profile must target `com.pixelbuyte.drip`, include Apple Pay, Associated Domains and Sign in with Apple, and match the stored certificate. The Apple profile is named `Drip App Store Validation 20261017`. This avoids creating another distribution certificate: Apple currently rejects creation at the account limit. No certificate is revoked, and no private key needs to be exported. The TestFlight/release workflows retain their existing signing setup and require separate approval before running.
 
 ## 3. Supabase-side setup (Required, you)
 
@@ -70,7 +70,7 @@ None of these are in the repo; they live in Codemagic.
 | Workflow | Steps | Artifacts | Publishing |
 |---|---|---|---|
 | `ios-unsigned-test` | Toolchain → `swift test` (JUnit XML) → XcodeGen → simulator tests (scheme auto-detected) → unsigned Release build | logs, `.xcresult`, `.app` | none |
-| `ios-signed-dev` | + public-config check → write `Local.xcconfig` → fetch or create **development** profile → `build-ipa` (Debug) | `.ipa`, logs | none |
+| `ios-signed-dev` | + public-config check → write `Local.xcconfig` → apply uploaded **App Store** certificate/profile → `build-ipa` (Release) | `.ipa`, logs | none |
 | `ios-testflight` | + build number = latest TestFlight build + 1 → **App Store** profile → `build-ipa` (Release) | `.ipa`, dSYMs | `submit_to_testflight: true`, `submit_to_app_store: false` |
 | `ios-production-release` | **Approval gate:** fails unless `RELEASE_APPROVED_BY` is set and the build is from `main` or a tag; then as TestFlight | `.ipa`, dSYMs | TestFlight + App Store review, `release_type: MANUAL` (a person presses Release in App Store Connect) |
 
