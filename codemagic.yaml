@@ -128,8 +128,11 @@ workflows:
       - dripkit.xcresult
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
 
-  # 2 — Signed development build: validates certificates, profile and
+  # 2 — Signed build validation: validates certificates, profile and
   #     entitlements (Sign in with Apple, Apple Pay) without distributing.
+  #     Uses an App Store profile because a development profile needs at
+  #     least one registered device; this account has none. Nothing is
+  #     uploaded: no publishing block.
   ios-signed-dev:
     name: iOS · signed development validation
     <<: *instance
@@ -142,7 +145,7 @@ workflows:
         - drip_public_config
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
-        SIGNING_TYPE: IOS_APP_DEVELOPMENT
+        SIGNING_TYPE: IOS_APP_STORE
     cache: *cache
     scripts:
       - *toolchain
@@ -151,10 +154,9 @@ workflows:
       - *public_build_settings
       - *generate_project
       - *signing
-      - name: Build signed development IPA
+      - name: Build signed validation IPA
         script: |
-          xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Debug \
-            --archive-flags="-destination 'generic/platform=iOS'"
+          xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Release
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
