@@ -224,7 +224,7 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        submit_to_testflight: false   # internal testers only; external beta review needs test info and approval
         submit_to_app_store: false
 
   # 4 — Production release. Only after explicit approval: refuses to run
