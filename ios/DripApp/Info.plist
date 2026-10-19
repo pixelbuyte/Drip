@@ -49,6 +49,9 @@
 	<!-- HTTPS-only networking: exempt from export documentation. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- Required by Apple (ITMS-90683): checkout card scanning references the camera. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Drip uses the camera to scan your payment card at checkout.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIAppFonts</key>
