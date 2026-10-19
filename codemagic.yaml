@@ -199,7 +199,7 @@ workflows:
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
         SIGNING_TYPE: IOS_APP_STORE
-        APP_STORE_APPLE_ID: "0000000000"   # numeric App Store Connect app id — set once the app record exists
+        APP_STORE_APPLE_ID: "6821465032"   # App Store Connect Apple ID of the Drip app record
     cache: *cache
     scripts:
       - *toolchain
@@ -246,7 +246,7 @@ workflows:
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
         SIGNING_TYPE: IOS_APP_STORE
-        APP_STORE_APPLE_ID: "0000000000"
+        APP_STORE_APPLE_ID: "6821465032"
     cache: *cache
     scripts:
       - name: Release approval gate
