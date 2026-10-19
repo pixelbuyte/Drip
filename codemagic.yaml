@@ -187,9 +187,15 @@ workflows:
       app_store_connect: codemagic1
     environment:
       <<: *environment_base
+      # Same stored certificate and Drip App Store profile that ios-signed-dev
+      # validated; creating another distribution certificate hits Apple's limit.
+      ios_signing:
+        certificates:
+          - Both
+        provisioning_profiles:
+          - drip_app_store_validation
       groups:
         - drip_public_config
-        - drip_signing
       vars:
         BUNDLE_ID: com.pixelbuyte.drip
         SIGNING_TYPE: IOS_APP_STORE
@@ -202,7 +208,11 @@ workflows:
       - *public_build_settings
       - *version
       - *generate_project
-      - *signing
+      - name: Signing files
+        script: |
+          set -euo pipefail
+          # ios_signing installs the uploaded signing identity and profile.
+          xcode-project use-profiles --project ios/Drip.xcodeproj
       - name: Build App Store IPA
         script: |
           xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Release
