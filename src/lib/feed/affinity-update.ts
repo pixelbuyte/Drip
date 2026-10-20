@@ -219,12 +219,21 @@ export async function recordFeedEventsForAffinity(
       (e) => e.type === 'watch95' || e.type === 'watch50'
     ).length;
 
+    // Persist result.RAW, not result.profile. The pure core's own contract
+    // (affinity.ts, ViewerAffinityUpdate doc): `raw` is the running state a
+    // caller persists; `profile` is the normalised, capped view the RANKER
+    // reads (viewer-context.ts derives it at read time via normalizeWithCap).
+    // Persisting the normalised maps here — as this code originally did — is
+    // a scale mismatch: normalised weights are <= 0.45 while one purchase
+    // event is +10, so a single event erased a viewer's whole history, and
+    // decay-then-renormalise was a near-no-op. Each individual pass looked
+    // correct; the damage only compounded across passes.
     const { error } = await db.from('viewer_profiles').upsert(
       {
         anon_id: args.anonId,
-        category_affinity: result.profile.categoryAffinity,
-        seller_affinity: result.profile.sellerAffinity,
-        hashtag_affinity: result.profile.hashtagAffinity,
+        category_affinity: result.raw.categoryAffinity,
+        seller_affinity: result.raw.sellerAffinity,
+        hashtag_affinity: result.raw.hashtagAffinity,
         scored_impressions: (row?.scored_impressions ?? 0) + scoredImpressionDelta,
         affinity_computed_at: args.now.toISOString(),
       },
