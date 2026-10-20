@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase-admin';
 import { getStripe, applicationFeeAmount } from '@/lib/stripe';
 import { rateLimit, clientIp } from '@/lib/rate-limit';
-import { ANON_COOKIE, verifyAnonId } from '@/lib/anon-id';
+import { resolveSignedAnonId } from '@/lib/anon-request';
 import { estimateFlatShippingCents } from '@/lib/shipping';
 
 export const dynamic = 'force-dynamic';
@@ -32,8 +32,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429 });
   }
 
-  const cookie = request.cookies.get(ANON_COOKIE)?.value;
-  const anonId = cookie ? await verifyAnonId(cookie) : null;
+  const anonId = await resolveSignedAnonId(request);
   if (!anonId) {
     return NextResponse.json({ error: 'No viewer identity' }, { status: 400 });
   }

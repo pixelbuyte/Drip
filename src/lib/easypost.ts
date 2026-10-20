@@ -112,7 +112,8 @@ export function verifyEasyPostSignature(
   signatureHeader: string | null,
   secret: string
 ): boolean {
-  if (!signatureHeader) return false;
+  // An empty key makes the HMAC computable by anyone: fail closed.
+  if (!signatureHeader || !secret) return false;
 
   const expected = `hmac-sha256-hex=${crypto
     .createHmac('sha256', secret)

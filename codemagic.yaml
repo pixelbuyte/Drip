@@ -1,0 +1,283 @@
+# Codemagic pipelines for the native SwiftUI app (ios/).
+#
+# NO workflow below has a `triggering:` section. Every build is started by a
+# person, from the Codemagic UI or API, because Codemagic minutes are paid.
+# Free compile/test checks run on GitHub Actions (.github/workflows/ios.yml).
+#
+# Credentials are never in this file or the repo. They live in Codemagic:
+#   - Team integration "codemagic1" (App Store Connect API key:
+#     issuer id, key id, .p8) — used for signing-file fetch and TestFlight.
+#   - Environment variable group `drip_public_config` — PUBLIC values only:
+#       DRIP_API_BASE_URL, DRIP_SUPABASE_URL, DRIP_SUPABASE_ANON_KEY,
+#       DRIP_STRIPE_PUBLISHABLE_KEY, DRIP_TEAM_ID, DRIP_APPLE_MERCHANT_ID,
+#       optional DRIP_ASSOCIATED_DOMAIN (defaults to DRIP_API_BASE_URL's host)
+#   - Environment variable group `drip_release_guard` — RELEASE_APPROVED_BY
+#     (the name of whoever approved a production release; checked below).
+# See docs/DRIP_CODEMAGIC_SETUP.md.
+
+definitions:
+  instance: &instance
+    instance_type: mac_mini_m2
+  environment_base: &environment_base
+    # Pin to the exact version once the first build succeeds (Codemagic
+    # build logs print it). App Store uploads must use a current SDK.
+    xcode: latest
+    cocoapods: default
+  cache: &cache
+    cache_paths:
+      - $HOME/Library/Caches/org.swift.swiftpm
+      - $HOME/Library/Developer/Xcode/DerivedData/**/SourcePackages
+  scripts:
+    - &toolchain
+      name: Toolchain
+      script: |
+        xcodebuild -version
+        brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+    - &check_public_config
+      name: Check public configuration
+      script: |
+        # Fail fast, without printing any value, if a required public
+        # setting is missing — or if a SECRET was pasted by mistake.
+        set -e
+        for v in DRIP_API_BASE_URL DRIP_SUPABASE_URL DRIP_SUPABASE_ANON_KEY DRIP_STRIPE_PUBLISHABLE_KEY DRIP_TEAM_ID; do
+          if [ -z "${!v}" ]; then echo "Missing $v in group drip_public_config"; exit 1; fi
+        done
+        case "$DRIP_STRIPE_PUBLISHABLE_KEY" in pk_*) ;; *) echo "DRIP_STRIPE_PUBLISHABLE_KEY must be a pk_ key"; exit 1;; esac
+        case "$DRIP_SUPABASE_ANON_KEY" in sb_secret_*) echo "DRIP_SUPABASE_ANON_KEY is a secret key"; exit 1;; esac
+    - &dripkit_tests
+      name: DripKit unit tests
+      script: |
+        set -o pipefail
+        cd ios/DripKit
+        swift test --xunit-output "$CM_BUILD_DIR/dripkit-tests.xml" 2>&1 | tee "$CM_BUILD_DIR/dripkit-tests.log"
+      test_report: dripkit-tests.xml
+    - &generate_project
+      name: Generate Xcode project
+      script: cd ios && xcodegen generate
+    - &public_build_settings
+      name: Write public build settings
+      script: |
+        # Passed as an xcconfig so URLs are not mangled by xcconfig "//"
+        # comment parsing (values come from the environment, not the file).
+        # "//" would start an xcconfig comment, so URLs are rewritten to
+        # https:$(SLASH)$(SLASH)host.
+        esc() { printf '%s' "$1" | sed 's#//#$(SLASH)$(SLASH)#'; }
+        # Universal links (applinks:) — the API base URL's bare host unless
+        # DRIP_ASSOCIATED_DOMAIN is set. Share links are built from that URL.
+        ASSOCIATED_DOMAIN="${DRIP_ASSOCIATED_DOMAIN:-$(printf '%s' "$DRIP_API_BASE_URL" | sed -E 's#^[A-Za-z]+://##; s#[/:?].*$##')}"
+        {
+          echo "DRIP_TEAM_ID = $DRIP_TEAM_ID"
+          echo "DRIP_API_BASE_URL = $(esc "$DRIP_API_BASE_URL")"
+          echo "DRIP_SUPABASE_URL = $(esc "$DRIP_SUPABASE_URL")"
+          echo "DRIP_SUPABASE_ANON_KEY = $DRIP_SUPABASE_ANON_KEY"
+          echo "DRIP_STRIPE_PUBLISHABLE_KEY = $DRIP_STRIPE_PUBLISHABLE_KEY"
+          echo "DRIP_APPLE_MERCHANT_ID = ${DRIP_APPLE_MERCHANT_ID:-merchant.com.pixelbuyte.drip}"
+          echo "DRIP_ASSOCIATED_DOMAIN = $ASSOCIATED_DOMAIN"
+        } > ios/Config/Local.xcconfig
+        echo "Wrote ios/Config/Local.xcconfig (values not printed)"
+    - &version
+      name: Set build number
+      script: |
+        # Build number = next after the latest TestFlight build, so uploads
+        # never collide. Marketing version stays as committed.
+        cd ios
+        LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+        NEXT=$((LATEST + 1))
+        sed -i '' "s/^CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $NEXT/" Config/Shared.xcconfig
+        echo "Build number $NEXT"
+    - &signing
+      name: Signing files
+      script: |
+        keychain initialize
+        # CERTIFICATE_PRIVATE_KEY (secure, group drip_signing) lets Codemagic
+        # create the distribution certificate; without it no profile can be made.
+        app-store-connect fetch-signing-files "$BUNDLE_ID" --type "$SIGNING_TYPE" --create \
+          --certificate-key @env:CERTIFICATE_PRIVATE_KEY
+        keychain add-certificates
+        xcode-project use-profiles --project ios/Drip.xcodeproj
+
+workflows:
+  # 1 — Unsigned compilation and automated tests. No credentials needed.
+  ios-unsigned-test:
+    name: iOS · unsigned build + tests
+    <<: *instance
+    max_build_duration: 45
+    environment:
+      <<: *environment_base
+    cache: *cache
+    scripts:
+      - *toolchain
+      - *dripkit_tests
+      - *generate_project
+      - name: Simulator tests (every SwiftUI screen compiled for iOS)
+        script: |
+          set -o pipefail
+          UDID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for r,v in d.items() if "iOS" in r for x in v if x["name"].startswith("iPhone")))')
+          cd ios/DripKit
+          SCHEME=$(xcodebuild -list -json | python3 -c 'import json,sys; s=json.load(sys.stdin)["workspace"]["schemes"]; print(next((x for x in s if x.endswith("-Package")), s[0]))')
+          xcodebuild test -scheme "$SCHEME" \
+            -destination "id=$UDID" \
+            -resultBundlePath "$CM_BUILD_DIR/dripkit.xcresult" | xcpretty
+      - name: Unsigned Release build (device)
+        script: |
+          set -o pipefail
+          cd ios
+          xcodebuild build -project Drip.xcodeproj -scheme Drip -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO | xcpretty
+    artifacts:
+      - dripkit-tests.log
+      - dripkit-tests.xml
+      - dripkit.xcresult
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+
+  # 2 — Signed build validation: validates certificates, profile and
+  #     entitlements (Sign in with Apple, Apple Pay) without distributing.
+  #     Uses an App Store profile because a development profile needs at
+  #     least one registered device; this account has none. Nothing is
+  #     uploaded: no publishing block.
+  ios-signed-dev:
+    name: iOS · signed development validation
+    <<: *instance
+    max_build_duration: 60
+    integrations:
+      app_store_connect: codemagic1
+    environment:
+      <<: *environment_base
+      # Reuse the uploaded certificate/private key and the matching Drip-only
+      # profile. Creating a fourth distribution certificate hits Apple's limit.
+      ios_signing:
+        certificates:
+          - Both
+        provisioning_profiles:
+          - drip_app_store_validation
+      groups:
+        - drip_public_config
+      vars:
+        BUNDLE_ID: com.pixelbuyte.drip
+        SIGNING_TYPE: IOS_APP_STORE
+    cache: *cache
+    scripts:
+      - *toolchain
+      - *check_public_config
+      - *dripkit_tests
+      - *public_build_settings
+      - *generate_project
+      - name: Signing files
+        script: |
+          set -euo pipefail
+          # ios_signing installs the uploaded signing identity and profile.
+          # Do not initialize another keychain or request a new certificate.
+          xcode-project use-profiles --project ios/Drip.xcodeproj
+      - name: Build signed validation IPA
+        script: |
+          xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - dripkit-tests.log
+
+  # 3 — TestFlight beta. Signed App Store build, uploaded for internal
+  #     testers only (no external review submission).
+  ios-testflight:
+    name: iOS · TestFlight beta
+    <<: *instance
+    max_build_duration: 75
+    integrations:
+      app_store_connect: codemagic1
+    environment:
+      <<: *environment_base
+      # Same stored certificate and Drip App Store profile that ios-signed-dev
+      # validated; creating another distribution certificate hits Apple's limit.
+      ios_signing:
+        certificates:
+          - Both
+        provisioning_profiles:
+          - drip_app_store_validation
+      groups:
+        - drip_public_config
+      vars:
+        BUNDLE_ID: com.pixelbuyte.drip
+        SIGNING_TYPE: IOS_APP_STORE
+        APP_STORE_APPLE_ID: "6821465032"   # App Store Connect Apple ID of the Drip app record
+    cache: *cache
+    scripts:
+      - *toolchain
+      - *check_public_config
+      - *dripkit_tests
+      - *public_build_settings
+      - *version
+      - *generate_project
+      - name: Signing files
+        script: |
+          set -euo pipefail
+          # ios_signing installs the uploaded signing identity and profile.
+          xcode-project use-profiles --project ios/Drip.xcodeproj
+      - name: Build App Store IPA
+        script: |
+          xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
+      - dripkit-tests.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false   # internal testers only; external beta review needs test info and approval
+        submit_to_app_store: false
+
+  # 4 — Production release. Only after explicit approval: refuses to run
+  #     unless RELEASE_APPROVED_BY is set for this build, and only submits
+  #     for App Store review — release to users stays a manual step in
+  #     App Store Connect.
+  ios-production-release:
+    name: iOS · production release (approval required)
+    <<: *instance
+    max_build_duration: 90
+    integrations:
+      app_store_connect: codemagic1
+    environment:
+      <<: *environment_base
+      groups:
+        - drip_public_config
+        - drip_signing
+        - drip_release_guard
+      vars:
+        BUNDLE_ID: com.pixelbuyte.drip
+        SIGNING_TYPE: IOS_APP_STORE
+        APP_STORE_APPLE_ID: "6821465032"
+    cache: *cache
+    scripts:
+      - name: Release approval gate
+        script: |
+          if [ -z "$RELEASE_APPROVED_BY" ]; then
+            echo "Refusing to build a production release: RELEASE_APPROVED_BY is not set."
+            echo "Set it in the drip_release_guard group (or as a build variable) after approval."
+            exit 1
+          fi
+          if [ "$CM_BRANCH" != "main" ] && [ -z "$CM_TAG" ]; then
+            echo "Production releases build from main or a release tag only (got $CM_BRANCH)."
+            exit 1
+          fi
+          echo "Release approved by: $RELEASE_APPROVED_BY"
+      - *toolchain
+      - *check_public_config
+      - *dripkit_tests
+      - *public_build_settings
+      - *version
+      - *generate_project
+      - *signing
+      - name: Build App Store IPA
+        script: |
+          xcode-project build-ipa --project ios/Drip.xcodeproj --scheme Drip --config Release
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: true
+        release_type: MANUAL

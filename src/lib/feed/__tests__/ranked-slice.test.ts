@@ -297,4 +297,52 @@ describe('getFeedSliceRankedOrNaive', () => {
     expect(result.items.length).toBeGreaterThan(0);
     expect(result.items[0].lane).not.toBe('chrono');
   });
+
+  // The Following surface used to be accepted and ignored, so a "Following"
+  // tab silently showed the whole For You feed.
+  describe('surface=following', () => {
+    function recordingDb(byTable: Record<string, unknown[]>) {
+      const filters: Array<{ table: string; op: string; args: unknown[] }> = [];
+      const queried: string[] = [];
+      const db = {
+        from(table: string) {
+          queried.push(table);
+          const rows = byTable[table] ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const builder: any = {};
+          for (const op of ['select', 'eq', 'not', 'or', 'in', 'order', 'limit', 'lt']) {
+            builder[op] = (...args: unknown[]) => {
+              filters.push({ table, op, args });
+              return builder;
+            };
+          }
+          builder.upsert = () => Promise.resolve({ data: null, error: null });
+          builder.then = (resolve: (r: { data: unknown; error: null }) => void) => resolve({ data: rows, error: null });
+          return builder;
+        },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { db: db as any, filters, queried };
+    }
+
+    it('serves only followed sellers, and skips the ranker', async () => {
+      const { db, filters, queried } = recordingDb({
+        feed_weights: [ACTIVE_WEIGHTS_ROW],
+        follows: [{ seller_id: 's1' }],
+        viewer_blocks: [],
+        videos: [videoRow()],
+      });
+      const result = await getFeedSliceRankedOrNaive(db, { ...NOW_PARAMS, surface: 'following' });
+      expect(queried).not.toContain('feed_weights');
+      expect(filters).toContainEqual({ table: 'videos', op: 'in', args: ['seller_id', ['s1']] });
+      expect(result.items.map((i) => i.lane)).toEqual(['chrono']);
+    });
+
+    it('is empty and exhausted for a viewer who follows nobody', async () => {
+      const { db, queried } = recordingDb({ follows: [], videos: [videoRow()] });
+      const result = await getFeedSliceRankedOrNaive(db, { ...NOW_PARAMS, surface: 'following' });
+      expect(result).toEqual({ items: [], exhausted: true, nextBefore: null });
+      expect(queried).not.toContain('videos');
+    });
+  });
 });

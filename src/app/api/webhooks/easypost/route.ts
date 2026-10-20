@@ -17,12 +17,18 @@ type EasyPostEvent = {
 const SHIPPED_STATUSES = new Set(['in_transit', 'out_for_delivery']);
 
 export async function POST(request: NextRequest) {
+  const secret = process.env.EASYPOST_WEBHOOK_SECRET;
+  if (!secret) {
+    // Unset secret = unverifiable webhook. Refuse rather than trust it;
+    // EasyPost retries, so nothing is lost once the secret is configured.
+    console.error('EASYPOST_WEBHOOK_SECRET is not set; rejecting webhook');
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+  }
+
   const rawBody = await request.text();
   const signature = request.headers.get('x-hmac-signature');
 
-  if (
-    !verifyEasyPostSignature(rawBody, signature, process.env.EASYPOST_WEBHOOK_SECRET ?? '')
-  ) {
+  if (!verifyEasyPostSignature(rawBody, signature, secret)) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 

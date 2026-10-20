@@ -1,0 +1,656 @@
+{
+  "flows": [
+    {
+      "id": "buy",
+      "name": "Watch it. Want it. Own it.",
+      "description": "The refined living shelf grows into a product peek, then a checkout that keeps the source visible.",
+      "frames": [
+        40,
+        41,
+        42,
+        24,
+        40
+      ],
+      "labels": [
+        "Peek at the tote",
+        "Buy now",
+        "Preview purchase confirmation",
+        "Back to your feed"
+      ]
+    },
+    {
+      "id": "comments",
+      "name": "A conversation, in context.",
+      "description": "Explore all three comment detents and return to exactly the same story.",
+      "frames": [
+        1,
+        4,
+        5,
+        6,
+        1
+      ],
+      "labels": [
+        "Open comments",
+        "Expand to 60%",
+        "Expand to 90%",
+        "Close comments"
+      ]
+    },
+    {
+      "id": "discover",
+      "name": "From curious to convinced.",
+      "description": "Discover an object, browse its category, hear from creators, then inspect the details.",
+      "frames": [
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "labels": [
+        "Explore Fashion",
+        "Search white sneakers",
+        "Inspect a product",
+        "See it on creators",
+        "Read reviews"
+      ]
+    },
+    {
+      "id": "shop",
+      "name": "The shop has a rhythm.",
+      "description": "Editorial leads, creator videos, product strips and collections alternate at a comfortable pace.",
+      "frames": [
+        7,
+        8,
+        9,
+        13,
+        2,
+        22
+      ],
+      "labels": [
+        "Next editorial module",
+        "See creator picks",
+        "Open product details",
+        "Peek in context",
+        "Continue to checkout"
+      ]
+    },
+    {
+      "id": "people",
+      "name": "Follow the taste you trust.",
+      "description": "Follow a person, explore their storefront, see new posts, and save the finds worth keeping.",
+      "frames": [
+        1,
+        38,
+        16,
+        17,
+        30,
+        19
+      ],
+      "labels": [
+        "Follow / mini-profile",
+        "Open creator storefront",
+        "Browse Following",
+        "Save a find",
+        "Open Saved"
+      ]
+    },
+    {
+      "id": "recover",
+      "name": "Make the next step obvious.",
+      "description": "Preserve the item and the user\u2019s work through payment, inventory and connectivity problems.",
+      "frames": [
+        42,
+        34,
+        35,
+        33,
+        1
+      ],
+      "labels": [
+        "Preview declined payment",
+        "Inspect unavailable variant",
+        "Inspect offline state",
+        "Retry feed"
+      ]
+    },
+    {
+      "id": "account",
+      "name": "Your corner of Drip.",
+      "description": "Light account navigation connects orders, notifications, saved finds, and the shopping bag.",
+      "frames": [
+        18,
+        20,
+        19,
+        21,
+        23,
+        22
+      ],
+      "labels": [
+        "Open notifications",
+        "View saved finds",
+        "Open bag",
+        "Edit delivery",
+        "Review checkout"
+      ]
+    },
+    {
+      "id": "formats",
+      "name": "One feed. Different stories.",
+      "description": "Compare, swipe a collection, read a mini-review, and discover an upcoming release.",
+      "frames": [
+        1,
+        25,
+        26,
+        27,
+        28,
+        29
+      ],
+      "labels": [
+        "Product comparison",
+        "Collection carousel",
+        "Mini-review",
+        "New drop announcement",
+        "Create a drop"
+      ]
+    },
+    {
+      "id": "states",
+      "name": "The spaces between.",
+      "description": "Loading, empty, and failed states communicate different problems and useful actions.",
+      "frames": [
+        31,
+        32,
+        36,
+        33,
+        34,
+        35
+      ],
+      "labels": [
+        "Empty collection",
+        "No search matches",
+        "Network unavailable",
+        "Payment declined",
+        "Variant unavailable"
+      ]
+    }
+  ],
+  "notes": {
+    "1": [
+      "Feed",
+      "Creator media dominates the space between a quiet Home header and a labeled dock.",
+      "Keep a single active video. Lock background scroll for sheets; restore post ID, playhead and mute preference."
+    ],
+    "2": [
+      "Feed",
+      "The compact shelf expands into a buying decision, while the creator stays in view.",
+      "320ms high-damping transition. Continue source video for peek; selected SKU must carry into checkout."
+    ],
+    "3": [
+      "Feed",
+      "Shop the frame links visible products to a numbered product list.",
+      "Render tags only for the current time range. Every tag also has an accessible list alternative."
+    ],
+    "4": [
+      "Social",
+      "A 25% comment sheet exposes the count, pinned conversation and composer.",
+      "Grow to 60% for reading; opening the keyboard promotes to 90% or a full-height accessible state."
+    ],
+    "5": [
+      "Social",
+      "The 60% comment sheet is the default reading and replying state.",
+      "Draft survives closing. Replies preserve list position. Sheet gestures start at the handle, never hijack list scrolling."
+    ],
+    "6": [
+      "Social",
+      "A 90% sheet supports deep conversation without a separate comments page.",
+      "Text scaling grows rows. Trap focus for this modal, make covered controls inert, and restore focus on close."
+    ],
+    "7": [
+      "Shop",
+      "Your daily drop is a single editorial story with contextual products.",
+      "Mix image-led modules and horizontal video strips; avoid a uniform shopping grid."
+    ],
+    "8": [
+      "Shop",
+      "The edit groups products around a useful theme and creator point of view.",
+      "Under $50 contains only current prices below $50. Preserve item position after opening a product."
+    ],
+    "9": [
+      "Shop",
+      "Creator picks make recommendations feel personal and grounded.",
+      "Show relationship explanations only when known. No fabricated popularity or ownership badges."
+    ],
+    "10": [
+      "Discover",
+      "Discover combines search, dimensional object categories and trending creator media.",
+      "Nine categories: Electronics, Fashion, Beauty, Home, Kitchen, Wellness, Plants, Accessories, Sports."
+    ],
+    "11": [
+      "Discover",
+      "Fashion uses editorial media and topical subcategories to encourage exploration.",
+      "Show trending videos, top products and creators, new drops and deals. Retain selected subcategory on Back."
+    ],
+    "12": [
+      "Discover",
+      "Search brings video, product, creator and collection results into one view.",
+      "Preserve query and filters. Distinguish connection failure from zero matches."
+    ],
+    "13": [
+      "Shop",
+      "Product detail provides imagery, price, variants, reviews and creator evidence.",
+      "Buying controls remain reachable. Ratings, discounts, shipping and returns require current product data."
+    ],
+    "14": [
+      "Shop",
+      "Seen on Drip shows several creators demonstrating the same product.",
+      "Match by canonical product ID. Keep paid relationships disclosed. Return from video to the same product."
+    ],
+    "15": [
+      "Shop",
+      "Sizing and reviews answer the remaining buying questions.",
+      "Only show sizes for products with size variants. A tote has colors, not invented sizes."
+    ],
+    "16": [
+      "Social",
+      "A creator storefront connects identity, original videos and curated collections.",
+      "Follow changes immediately with a rollback on failure. Collections come from actual creator records."
+    ],
+    "17": [
+      "Social",
+      "Following prioritizes people the user deliberately follows.",
+      "Use chronological recent posts and opted-in reminders. Provide Discover creators when empty."
+    ],
+    "18": [
+      "Account",
+      "Personal profile keeps shopping history and preferences easy to reach.",
+      "Orders open order status, not a new checkout. Keep recommendations below essential account controls."
+    ],
+    "19": [
+      "Account",
+      "Saved mixes products, videos and collections with useful smart filters.",
+      "Bookmark means Save; heart means Like. Price alerts are separate opt-in preferences."
+    ],
+    "20": [
+      "Account",
+      "Notifications favor useful changes over engagement noise.",
+      "Group repeats. Read/unread has a text or shape cue. Resolve stale alerts against current inventory."
+    ],
+    "21": [
+      "Checkout",
+      "The bag shows the exact SKU, variant, quantity and price before purchase.",
+      "Quantity changes recalculate totals. Removing an item allows undo; stock changes do not replace variants."
+    ],
+    "22": [
+      "Checkout",
+      "Quick checkout keeps the source media visible above the purchasing surface.",
+      "Hide and disable underlying navigation. Revalidate prices and inventory. Use native wallet controls only when available."
+    ],
+    "23": [
+      "Checkout",
+      "Delivery editing sits one level deeper in the checkout flow.",
+      "Use explicit labels, address autofill and country-aware fields. Preserve valid fields and revalidate shipping."
+    ],
+    "24": [
+      "Checkout",
+      "It's yours returns the shopper to the same feed post.",
+      "Show success only after confirmed order state. Illustrative item $78; full order total $84.24 including $6.24 tax."
+    ],
+    "25": [
+      "Feed",
+      "A comparison post supports a side-by-side decision within one feed slot.",
+      "Label both products independently. Buying one must never silently switch to the other."
+    ],
+    "26": [
+      "Feed",
+      "Collection posts use horizontal movement inside the vertical feed.",
+      "Lock gesture axis after intent is clear. Keep vertical feed navigation available outside the carousel."
+    ],
+    "27": [
+      "Feed",
+      "A mini-review foregrounds the creator\u2019s verdict and the product behind it.",
+      "Only show supported ownership, usage-duration or repurchase statements. Keep commerce disclosure visible."
+    ],
+    "28": [
+      "Feed",
+      "A new drop announcement is a quieter alternative to an ordinary feed post.",
+      "Use a real release time and timezone. Reminders require explicit opt-in."
+    ],
+    "29": [
+      "Social",
+      "Create a drop begins with media and product tagging.",
+      "Keep drafts through permission, connection or upload failures. Preview before publishing."
+    ],
+    "30": [
+      "Account",
+      "Save to a collection offers organization without interrupting discovery.",
+      "Immediate bookmark feedback; choosing a collection is optional. Preserve a default saved item on dismiss."
+    ],
+    "31": [
+      "States",
+      "Stable skeletons explain loading without rearranging the page.",
+      "Respect reduced motion. After failure, replace indefinite shimmer with a specific retry action."
+    ],
+    "32": [
+      "States",
+      "An empty Saved view offers a clear first step.",
+      "Do not manufacture saved products. Return to discovery and explain how bookmarking works."
+    ],
+    "33": [
+      "States",
+      "The feed connection state retains available content and offers retry.",
+      "Keep cached media, drafts and feed position. Do not label a network failure as an empty feed."
+    ],
+    "34": [
+      "States",
+      "A declined payment keeps item and address context intact.",
+      "Offer another payment method. Unknown payment status is different: check status before offering retry."
+    ],
+    "35": [
+      "States",
+      "An unavailable variant is a choice to resolve, not an automatic substitution.",
+      "Keep available options labeled. Any changed price or variant requires review before purchase."
+    ],
+    "36": [
+      "States",
+      "No search matches keeps the query and gives a useful recovery path.",
+      "Offer clear filters and suggested spelling. Preserve input. Do not show this for failed requests."
+    ],
+    "37": [
+      "Social",
+      "A small local heart makes double-tap feel tactile without taking over the video.",
+      "Double-tap only likes; never unlikes. One count increment per action. 260ms; no burst with reduced motion."
+    ],
+    "38": [
+      "Social",
+      "A follow becomes Following immediately; the mini-profile offers more context.",
+      "180ms label/check change. Optimistic state rolls back on failure, with a retry message."
+    ],
+    "39": [
+      "Feed",
+      "Product scrub previews a small set of variants while the media remains visible.",
+      "Hold 350ms, lock horizontal intent, announce the highlighted color. Explicit taps are the accessible alternative."
+    ],
+    "40": [
+      "Refinement",
+      "The living shelf moves social actions into a compact horizontal row and preserves the product focal point.",
+      "The second shelf is a 44pt Shop this look target. Count only tagged products: tote, knit and denim. Coffee is set dressing."
+    ],
+    "41": [
+      "Refinement",
+      "The chosen shade remains explicit, and all purchase information fits into one contextual sheet.",
+      "Ink on coral passes normal-text contrast. Selected color uses check + label. Match SKU imagery to chosen color."
+    ],
+    "42": [
+      "Refinement",
+      "A clear total and editable delivery/payment details bring the purchase into the same visual context.",
+      "The $84.24 total is illustrative. Production tax is calculated from actual checkout data. Make the background header inert."
+    ]
+  },
+  "actions": {
+    "1": [
+      [
+        2,
+        "Peek at product"
+      ],
+      [
+        5,
+        "Open comments"
+      ],
+      [
+        3,
+        "Shop the frame"
+      ],
+      [
+        38,
+        "Follow creator"
+      ]
+    ],
+    "2": [
+      [
+        22,
+        "Buy now"
+      ],
+      [
+        13,
+        "Full details"
+      ],
+      [
+        1,
+        "Back to feed"
+      ]
+    ],
+    "3": [
+      [
+        2,
+        "Inspect the tote"
+      ],
+      [
+        1,
+        "Back to feed"
+      ]
+    ],
+    "4": [
+      [
+        5,
+        "Read more comments"
+      ],
+      [
+        1,
+        "Close comments"
+      ]
+    ],
+    "5": [
+      [
+        6,
+        "Expand conversation"
+      ],
+      [
+        1,
+        "Close comments"
+      ]
+    ],
+    "6": [
+      [
+        5,
+        "Collapse to 60%"
+      ],
+      [
+        1,
+        "Close comments"
+      ]
+    ],
+    "13": [
+      [
+        14,
+        "Seen on Drip"
+      ],
+      [
+        15,
+        "Reviews and sizing"
+      ],
+      [
+        22,
+        "Buy now"
+      ]
+    ],
+    "18": [
+      [
+        19,
+        "Saved"
+      ],
+      [
+        20,
+        "Notifications"
+      ],
+      [
+        21,
+        "Shopping bag"
+      ]
+    ],
+    "19": [
+      [
+        30,
+        "Save to collection"
+      ],
+      [
+        13,
+        "Inspect saved product"
+      ]
+    ],
+    "20": [
+      [
+        19,
+        "Price-drop alert"
+      ],
+      [
+        18,
+        "Your profile"
+      ]
+    ],
+    "21": [
+      [
+        22,
+        "Checkout"
+      ],
+      [
+        7,
+        "Keep shopping"
+      ]
+    ],
+    "22": [
+      [
+        23,
+        "Edit delivery"
+      ],
+      [
+        24,
+        "Preview confirmed order"
+      ],
+      [
+        34,
+        "Preview payment declined"
+      ]
+    ],
+    "23": [
+      [
+        22,
+        "Return to checkout"
+      ]
+    ],
+    "24": [
+      [
+        40,
+        "Back to your feed"
+      ]
+    ],
+    "31": [
+      [
+        7,
+        "Preview loaded Shop"
+      ]
+    ],
+    "32": [
+      [
+        10,
+        "Discover products"
+      ]
+    ],
+    "33": [
+      [
+        1,
+        "Preview successful retry"
+      ]
+    ],
+    "34": [
+      [
+        22,
+        "Review another method"
+      ]
+    ],
+    "35": [
+      [
+        2,
+        "Choose an available variant"
+      ]
+    ],
+    "36": [
+      [
+        10,
+        "Clear search"
+      ]
+    ],
+    "37": [
+      [
+        1,
+        "Return to feed"
+      ]
+    ],
+    "38": [
+      [
+        16,
+        "Creator profile"
+      ],
+      [
+        17,
+        "Following feed"
+      ]
+    ],
+    "39": [
+      [
+        2,
+        "Open product peek"
+      ]
+    ],
+    "40": [
+      [
+        41,
+        "Peek at the tote"
+      ],
+      [
+        5,
+        "Read comments"
+      ],
+      [
+        3,
+        "Shop this look"
+      ],
+      [
+        7,
+        "Open Shop"
+      ]
+    ],
+    "41": [
+      [
+        42,
+        "Buy now \u00b7 $78"
+      ],
+      [
+        13,
+        "Full details"
+      ],
+      [
+        40,
+        "Close peek"
+      ]
+    ],
+    "42": [
+      [
+        24,
+        "Preview confirmed order"
+      ],
+      [
+        23,
+        "Edit delivery"
+      ],
+      [
+        34,
+        "Preview payment declined"
+      ],
+      [
+        41,
+        "Back to product"
+      ]
+    ]
+  }
+}

@@ -1,5 +1,7 @@
 # Production migration pre-flight — chain 00006–00016 → tkppdmrkvyjixaiocwmd
 
+> **Added after this analysis (branch `native-ios`):** `00017_reactions_no_clobber.sql` and `00018_claim_second_device.sql`. Both only `CREATE OR REPLACE FUNCTION` (plus REVOKE/GRANT on that function), touch no table, and take no table locks, so the lock analysis below is unchanged. Apply them after 00016, in order. Both were executed against PostgreSQL 16 (see `docs/DRIP_BACKEND_INTEGRATION.md` §6).
+
 Status: **NOT READY TO APPLY** until every item in "Blockers" is closed.
 Nothing in producing this document touched production; every production
 access was a read-only query via the management API, logged below.
