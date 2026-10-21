@@ -219,12 +219,20 @@ export async function recordFeedEventsForAffinity(
       (e) => e.type === 'watch95' || e.type === 'watch50'
     ).length;
 
+    // Persist the RAW (decayed + accumulated, un-normalised) maps, not
+    // result.profile. The stored maps are this pass's running state and are
+    // read back above as the next pass's input; storing the normalised,
+    // capped maps (every key <= 0.45) put history on a different scale from
+    // event weights (a purchase is +10), so one big event erased everything
+    // before it and decay became a no-op. See ViewerAffinityUpdate in
+    // scoring/affinity.ts. Ranking reads normalise at read time
+    // (viewer-context.ts's loadViewerProfile).
     const { error } = await db.from('viewer_profiles').upsert(
       {
         anon_id: args.anonId,
-        category_affinity: result.profile.categoryAffinity,
-        seller_affinity: result.profile.sellerAffinity,
-        hashtag_affinity: result.profile.hashtagAffinity,
+        category_affinity: result.raw.categoryAffinity,
+        seller_affinity: result.raw.sellerAffinity,
+        hashtag_affinity: result.raw.hashtagAffinity,
         scored_impressions: (row?.scored_impressions ?? 0) + scoredImpressionDelta,
         affinity_computed_at: args.now.toISOString(),
       },
