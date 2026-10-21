@@ -52,7 +52,10 @@ export default function NewDropPage() {
         }))
         .filter((dim) => dim.name && dim.options.length > 0);
 
-      const res = await fetch('/api/drops', {
+      // POST /api/videos creates the listing on the feed content model
+      // (products, videos, video_products) and accepts this body as-is;
+      // category_slug defaults to 'other'.
+      const res = await fetch('/api/videos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -71,7 +74,7 @@ export default function NewDropPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create drop');
+      if (!res.ok) throw new Error(data.error || 'Failed to create listing');
 
       setUploadUrl(data.upload_url);
     } catch (err) {
@@ -113,10 +116,10 @@ export default function NewDropPage() {
                 </p>
               </div>
               <button
-                onClick={() => router.push('/dashboard/drops')}
+                onClick={() => router.push('/studio/videos')}
                 className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white hover:bg-blue-700"
               >
-                Go to My Drops
+                Go to My Videos
               </button>
             </div>
           )}
