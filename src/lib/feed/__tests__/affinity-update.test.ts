@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { recordFeedEventsForAffinity, type RawFeedEvent } from '../affinity-update';
+import { normalizeWithCap } from '@/lib/scoring/affinity';
 
 function sourceOf(opts: {
   videos?: Record<string, unknown>[];
@@ -272,6 +273,63 @@ describe('recordFeedEventsForAffinity', () => {
     // Under the updated_at bug this inverts: 0.97^90 ≈ 0.065 of c1 vs 0.3 of
     // c2 puts c2 on top. With the fix, 0.97 of c1 vs 0.3 of c2 keeps c1 first.
     expect(row!.category_affinity.c1).toBeGreaterThan(row!.category_affinity.c2);
+  });
+
+  it('persists the RAW running state, so one big event does not dwarf stored history across passes', async () => {
+    // Regression: the upsert used to store result.profile (normalised to sum
+    // 1, each key capped at 0.45) and read it back as the next pass's input.
+    // History then sat on a 0..0.45 scale while a single purchase adds +10,
+    // so one purchase in a new category wiped out everything before it.
+    // Chain two real passes through the same double: pass 2's input is
+    // exactly what pass 1 upserted.
+    const videos = [
+      { id: 'v1', seller_id: 's1', category_id: 'c1', hashtags: [] },
+      { id: 'v2', seller_id: 's1', category_id: 'c2', hashtags: [] },
+      { id: 'v3', seller_id: 's1', category_id: 'c3', hashtags: [] },
+      { id: 'v4', seller_id: 's1', category_id: 'c4', hashtags: [] },
+    ];
+    const PASS1_AT = new Date('2026-08-09T00:00:00Z'); // one day before NOW
+
+    // Pass 1: an established history — four purchases in c1, one each in c3/c4.
+    let row1: Record<string, unknown> | null = null;
+    await recordFeedEventsForAffinity(
+      sourceOf({ videos, viewerProfile: null, onUpsert: (row) => { row1 = row; } }),
+      {
+        anonId: 'a1',
+        events: [
+          { t: 'purchase', v: 'v1' },
+          { t: 'purchase', v: 'v1' },
+          { t: 'purchase', v: 'v1' },
+          { t: 'purchase', v: 'v1' },
+          { t: 'purchase', v: 'v3' },
+          { t: 'purchase', v: 'v4' },
+        ],
+        now: PASS1_AT,
+      }
+    );
+    expect(row1).not.toBeNull();
+    const stored1 = (row1 as unknown as { category_affinity: Record<string, number> }).category_affinity;
+
+    // Pass 2, one day later: a single purchase in a brand-new category c2.
+    let row2: Record<string, unknown> | null = null;
+    await recordFeedEventsForAffinity(
+      sourceOf({
+        videos,
+        viewerProfile: { ...row1!, price_band: null, updated_at: PASS1_AT.toISOString() },
+        onUpsert: (row) => { row2 = row; },
+      }),
+      { anonId: 'a1', events: [{ t: 'purchase', v: 'v2' }], now: NOW }
+    );
+    expect(row2).not.toBeNull();
+    const stored2 = (row2 as unknown as { category_affinity: Record<string, number> }).category_affinity;
+
+    // The history carried over on the event scale: one day of decay, no more.
+    expect(stored2.c1).toBeCloseTo(stored1.c1 * 0.97, 9);
+    // And the one new purchase did not overtake four prior ones — neither in
+    // the stored state nor in the normalised map the ranker reads from it.
+    expect(stored2.c1).toBeGreaterThan(stored2.c2);
+    const ranked = normalizeWithCap(stored2);
+    expect(ranked.c1).toBeGreaterThan(ranked.c2);
   });
 
   it('an unfollow event nudges seller affinity down when the video meta resolves the seller', async () => {

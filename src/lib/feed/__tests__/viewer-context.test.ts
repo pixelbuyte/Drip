@@ -34,13 +34,15 @@ describe('loadViewerContext', () => {
     expect(ctx.profile.priceBand).toBeNull();
   });
 
-  it('maps a populated viewer_profiles row', async () => {
+  it('maps a populated viewer_profiles row, normalising the stored raw affinity maps', async () => {
+    // viewer_profiles holds the affinity pass's RAW running state (event-weight
+    // scale); the ranker must see normalised, capped maps.
     const ctx = await loadViewerContext(
       sourceOf({
         viewer_profiles: [
           {
-            category_affinity: { footwear: 0.6, beauty: 0.2 },
-            seller_affinity: { s1: 0.4 },
+            category_affinity: { footwear: 12, beauty: 4, bags: 4 },
+            seller_affinity: { s1: 7 },
             hashtag_affinity: {},
             price_band: { p25: 1000, p50: 2000, p75: 4000 },
             cold_start_complete: true,
@@ -49,7 +51,13 @@ describe('loadViewerContext', () => {
       }),
       { anonId: 'a1', countryCode: 'US', excludeIds: new Set() }
     );
-    expect(ctx.profile.categoryAffinity).toEqual({ footwear: 0.6, beauty: 0.2 });
+    // 12/4/4 -> 0.6/0.2/0.2, then footwear capped at 0.45 and its overflow
+    // shared proportionally: 0.275 each.
+    expect(ctx.profile.categoryAffinity.footwear).toBeCloseTo(0.45, 12);
+    expect(ctx.profile.categoryAffinity.beauty).toBeCloseTo(0.275, 12);
+    expect(ctx.profile.categoryAffinity.bags).toBeCloseTo(0.275, 12);
+    expect(ctx.profile.sellerAffinity).toEqual({ s1: 1 });
+    expect(ctx.profile.hashtagAffinity).toEqual({});
     expect(ctx.profile.priceBand).toEqual({ p25: 1000, p50: 2000, p75: 4000 });
     expect(ctx.profile.coldStartComplete).toBe(true);
   });
