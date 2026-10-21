@@ -56,7 +56,7 @@ How to use it:
 - [ ] XCUITest smoke flows green (Proposed: launch → feed → peek → checkout sheet → cancel).
 
 ## 5. App Store submission
-- [ ] Privacy nutrition labels match `ios/DripApp/PrivacyInfo.xcprivacy`: email, physical address, purchase history, product interaction, photos/videos; no tracking.
+- [ ] Privacy nutrition labels entered in App Store Connect exactly as listed in §8, which mirrors `ios/DripApp/PrivacyInfo.xcprivacy`. No tracking.
 - [ ] App Review notes:
   - physical goods sold by creators, so guideline 3.1.3(e) applies (no IAP);
   - demo account credentials;
@@ -88,3 +88,40 @@ Switch-over steps:
 - [ ] `RELEASE_APPROVED_BY` set by the approver; `ios-production-release` run from `main` or a tag.
 - [ ] After review approval, a person presses **Release** in App Store Connect (`release_type: MANUAL`).
 - [ ] Monitoring after launch: crash rate (Xcode Organizer); `/api/events` and `/api/checkout/intent` error rates in Vercel logs.
+
+## 8. App Store privacy nutrition labels
+
+Copy these answers into App Store Connect → the app → **App Privacy**. They match `NSPrivacyCollectedDataTypes` in `ios/DripApp/PrivacyInfo.xcprivacy`; if you change one, change the other in the same PR.
+
+**Data used to track you:** none. Answer **No** to "Do you or your third-party partners use data for tracking purposes?". The app has no IDFA, no App Tracking Transparency prompt, no ad SDKs, and shares no data with data brokers. `NSPrivacyTracking` is `false` and `NSPrivacyTrackingDomains` is empty.
+
+**Do you collect data from this app?** Yes.
+
+For every type below, answer **Linked to the user's identity: Yes** and **Used for tracking: No**.
+
+| App Store Connect category → type | Purposes to tick | What it is in Drip (source) |
+|---|---|---|
+| Contact Info → **Name** | App Functionality | Shipping name from Stripe's address sheet (`orders.buyer_name`); the name Google returns at sign-in (Supabase Auth). The Sign in with Apple name is requested but not sent to Drip's server. |
+| Contact Info → **Email Address** | App Functionality | Sign-in (Apple, Google, email/password, email code) and the checkout receipt email (`orders.buyer_email`). |
+| Contact Info → **Phone Number** | App Functionality | Optional phone field on Stripe's shipping address sheet. Stripe keeps it on the PaymentIntent; Drip does not copy it. |
+| Contact Info → **Physical Address** | App Functionality | Shipping address (`orders.shipping_address`); the shipping label is bought for it. |
+| Financial Info → **Payment Info** | App Functionality | Card / Apple Pay details entered in Stripe PaymentSheet. Collected by Stripe; never reaches Drip's code or servers. |
+| Purchases → **Purchase History** | App Functionality, Analytics, Product Personalization | Order records; also used for feed ranking (items and sellers already bought) and per-video sales stats. |
+| Identifiers → **User ID** | App Functionality | Supabase account ID (and a creator's public handle). |
+| Identifiers → **Device ID** | App Functionality, Analytics, Product Personalization | App-generated viewer ID kept in the Keychain, sent as `x-drip-anon-token`. Claimed by the account at sign-in (`/api/session/link`) and stored on guest orders (`buyer_anon_id`). Not the IDFA or IDFV. |
+| Usage Data → **Product Interaction** | App Functionality, Analytics, Product Personalization | Feed events (`/api/events`): impressions, watch time, skips, replays, likes, saves, shares, follows, product taps, variant picks, add to bag, checkout open/abandon, not interested, reports. Keyed to the viewer ID, so linked once an account claims it. |
+| Diagnostics → **Other Diagnostic Data** | App Functionality, Analytics | `video_error` events: a video failed to play (video ID and feed position only). |
+| User Content → **Photos or Videos** | App Functionality | Creator video uploads (PhotosPicker, videos only), uploaded to Mux. |
+| User Content → **Other User Content** | App Functionality | Creator listing text: title, description, caption, hashtags, variants. |
+
+**Not collected:** leave these unticked. Revisit them if the code changes.
+- Location (precise or coarse), Contacts, Health & Fitness, Sensitive Info, Browsing History, Audio, Gameplay Content, Customer Support, Emails or Text Messages.
+- **Search History**: Explore search queries go to `/api/search` to answer that request only. Neither the route nor `search_feed_videos` stores them. If you add query logging, declare Search History.
+- **Crash Data / Performance Data**: the app ships no crash or metrics SDK (no MetricKit, no Sentry) and sends no crash logs or timings to Drip's servers. Xcode Organizer crash reports come from Apple's own opt-in device analytics, not from the app. If you add a crash reporter, declare Crash Data.
+- **Advertising Data, Other Financial Info, Credit Info**: none. Creator payouts onboarding runs on Stripe-hosted Connect pages, so Stripe collects that data under its own terms, not in this app.
+- Camera: Stripe's card scanner uses the camera on device only (hence `NSCameraUsageDescription`); no image leaves the device.
+
+**Before you submit:**
+- [ ] In Xcode, **Product → Archive**, then in the Organizer right-click the archive → **Generate Privacy Report**. Check that the report merges this manifest with the Stripe SDK's own manifests. Add any data type the report shows from Stripe that is missing from the table above.
+- [ ] The privacy policy at `/legal/privacy` names every type in the table above, plus Stripe, Mux, Supabase and EasyPost as processors.
+- [ ] The privacy policy explains in-app account deletion (Profile → Delete account, `DELETE /api/me`).
