@@ -49,7 +49,7 @@
 | Route | Reason |
 |---|---|
 | `/api/checkout` (Stripe Checkout) | Legacy `drops` flow, broken in both schemas (audit D §0.1); in-app checkout uses `checkout/intent` |
-| `/api/waitlist`, `/api/report` | Legacy `drop_id` keys; the app reports through the `report` event (telemetry only) |
+| `/api/waitlist`, `/api/report` | Legacy `drop_id` keys; the app reports through the `report` event, which lands in the moderation queue (§8) |
 | `/api/dashboard/stats`, `/api/orders/export`, `/api/drops/{id}/restock` | Legacy `drops`/`orders.drop_id` |
 | `/api/discounts`, `/api/settings/address`, `/api/orders/{id}/retry-label` | Bearer-capable now, but not yet in the native Studio (roadmap M4) |
 | `/api/stripe/onboarding/refresh`, `/auth/callback` | Browser redirect targets |
@@ -135,6 +135,7 @@ Response:
 | Feed cursor | `src/lib/feed/slice.ts` | `slice.test.ts` (fails on the old code) |
 | Like/save clobber | `supabase/migrations/00017_reactions_no_clobber.sql` | executed against PostgreSQL 16 (7 sequences); not yet applied anywhere |
 | Second-device sign-in | `supabase/migrations/00018_claim_second_device.sql` | PostgreSQL 16: the 00010 function raises 23505 on device 2; with 00018, devices 2 and 3 link to device 1's canonical identity, re-claim is idempotent, another account is refused, and two concurrent claims produce exactly one canonical identity. Not yet applied anywhere |
+| Report moderation queue | `supabase/migrations/00020_report_moderation_queue.sql` | PostgreSQL 16, chain 00001/00002/00006–00020: a report writes one `reports` row and one permanent `viewer_blocks` row; a repeat (or a re-admitted report after the dedupe sweep) adds neither; an existing `not_interested` block is upgraded, an `admin` block keeps its reason; non-report events leave byte-identical state to 00019; pre-00020 reports are backfilled. Not yet applied anywhere |
 
 Web suite: 886 passed, 1 skipped; `tsc --noEmit` clean.
 
@@ -145,3 +146,49 @@ Web suite: 886 passed, 1 skipped; `tsc --noEmit` clean.
 - **Two projects build every push to this repo:** `drip` (new, `prj_XpjIReKhmhj9div165dWiJqshIxk`) and `drip-backend` (current production, `prj_axftVSFn4O1ahYNmbP8W9IhgWVdW`). Both preview deployments for `native-ios` built successfully (Vercel bot on PR #14).
 - **`drip-deploy`** appears unused.
 - **Migration plan and the secret-copy constraint:** DRIP_RELEASE_CHECKLIST.md §Vercel.
+
+---
+
+## 8. Moderation (reports, App Store 1.2)
+
+Requires `00020_report_moderation_queue.sql`. Production does not have it yet; before it ships, a report only lowers ranking.
+
+**What happens when a viewer reports.** The app sends `{"t":"report","v":<video>,"meta":{"reason":"Prohibited item"}}` to `POST /api/events`. `ingest_feed_events` admits the event the same way as before: same dedupe key `rep:<anon>:<video>`, same caps, and it still feeds `video_stats.reports_all` for ranking. In the same transaction it also:
+- **Adds a row to `public.reports`** with `video_id`, `reporter_anon_id`, and `product_id` (the event's `p` if sent, otherwise the video's product when it has exactly one, otherwise NULL). `reason` is one of the four allowed values: the app's text is mapped to `prohibited_item`, `copyright` or `scam` when it matches, otherwise `other`. The app's original text is kept in `details`. There is one row per reporter per video (unique index `reports_reporter_video_key`), so repeat reports add nothing.
+- **Hides the video from that viewer for good** with a `viewer_blocks` row (`subject_type='video'`, `reason='report'`, `expires_at` NULL). The naive feed, the ranked feed and search all read it through `loadViewerBlocks` (`src/lib/feed/blocks.ts`). The app also drops the video from the current page straight away.
+
+`reports` is service-role only: RLS is on with no policies, and 00020 revokes all privileges from `anon` and `authenticated`. Sellers never see who reported them, or that they were reported.
+
+**Reviewing the queue.** In the Supabase dashboard, use the SQL editor (it runs as `postgres`) or Table Editor → `reports` filtered on `resolved_at is null`. To see open reports grouped by video, most-reported first:
+
+```sql
+SELECT r.video_id, v.status AS video_status, pr.handle AS seller,
+       count(*) AS open_reports, min(r.created_at) AS first_reported,
+       array_agg(DISTINCT r.reason) AS reasons,
+       array_agg(r.details) FILTER (WHERE r.details IS NOT NULL) AS reporter_text
+  FROM public.reports r
+  JOIN public.videos v ON v.id = r.video_id
+  LEFT JOIN public.profiles pr ON pr.id = v.seller_id
+ WHERE r.resolved_at IS NULL
+ GROUP BY r.video_id, v.status, pr.handle
+ ORDER BY open_reports DESC, first_reported;
+```
+
+Watch the video at `https://<host>/v/<video_id>` while it is still live, or in the Mux dashboard by its `mux_playback_id`. Aim to act on every open report within 24 hours.
+
+**Taking a video down.** This removes it for everyone and closes its reports:
+
+```sql
+BEGIN;
+UPDATE public.videos  SET status = 'removed', removed_reason = 'moderation: <short reason>'
+ WHERE id = '<video_id>';
+UPDATE public.reports SET resolved_at = now()
+ WHERE video_id = '<video_id>' AND resolved_at IS NULL;
+COMMIT;
+```
+
+The feed, search, and `/v/<id>` share pages serve only `status = 'live'` videos, so the video disappears on the next request. The `guard_video_status` trigger (00007) lets only `postgres` or `service_role` move a video out of `removed`, so the seller cannot restore it. `removed_reason` is limited to 200 characters. The anon role can't read it, but a signed-in seller can probably read it on their own video (00007 grants `authenticated` SELECT on every `videos` column), so keep it factual. Deleting the Mux asset is optional and done in the Mux dashboard. For a repeat offender, also set the seller's products to `status = 'archived'`.
+
+**Dismissing a report** (no violation): `UPDATE public.reports SET resolved_at = now() WHERE id = '<report_id>';`. The reporter's own block stays, so they still won't see the video.
+
+**Gaps.** No admin UI. No notification when a report arrives, so check the queue on a schedule using the SQL above. `reports` has no column for the action taken; the video's `removed_reason` records it.
