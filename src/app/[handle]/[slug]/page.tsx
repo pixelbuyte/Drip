@@ -1,4 +1,4 @@
-import { notFound, permanentRedirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createPublicClient } from '@/lib/supabase-public';
 import { resolveLegacyDropVideoId } from '@/lib/legacy-drop-link';
 import { sharedVideoPath } from '@/lib/feed/shared-video';
@@ -14,5 +14,5 @@ type Params = { handle: string; slug: string };
 export default async function LegacyDropPage({ params }: { params: Promise<Params> }) {
   const videoId = await resolveLegacyDropVideoId(createPublicClient(), await params);
   if (!videoId) notFound();
-  permanentRedirect(sharedVideoPath(videoId));
+  redirect(sharedVideoPath(videoId));
 }
