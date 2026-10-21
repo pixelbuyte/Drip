@@ -13,7 +13,8 @@ type Order = {
   status: string;
   tracking_code: string | null;
   label_url: string | null;
-  drops: { title: string } | { title: string }[] | null;
+  // order_items replaced orders.drop_id (00007); titles are snapshotted per item.
+  order_items: { title_snapshot: string; quantity: number }[] | null;
 };
 
 const statusStyles: Record<string, string> = {
@@ -32,9 +33,10 @@ const statusLabels: Record<string, string> = {
   refunded: 'Refunded',
 };
 
-function dropTitle(o: Order): string {
-  if (!o.drops) return '';
-  return Array.isArray(o.drops) ? (o.drops[0]?.title ?? '') : o.drops.title;
+function itemTitle(o: Order): string {
+  return (o.order_items ?? [])
+    .map((i) => (i.quantity > 1 ? `${i.title_snapshot} ×${i.quantity}` : i.title_snapshot))
+    .join(', ');
 }
 
 export default function OrdersPage() {
@@ -58,7 +60,7 @@ export default function OrdersPage() {
     const { data } = await supabase
       .from('orders')
       .select(
-        'id, created_at, buyer_name, buyer_email, amount_cents, status, tracking_code, label_url, drops(title)'
+        'id, created_at, buyer_name, buyer_email, amount_cents, status, tracking_code, label_url, order_items(title_snapshot, quantity)'
       )
       .eq('seller_id', user.id)
       .order('created_at', { ascending: false });
@@ -125,7 +127,7 @@ export default function OrdersPage() {
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-gray-900">{dropTitle(order)}</span>
+                    <span className="font-semibold text-gray-900">{itemTitle(order)}</span>
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[order.status] ?? ''}`}
                     >

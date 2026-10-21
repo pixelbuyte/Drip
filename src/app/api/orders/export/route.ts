@@ -21,7 +21,9 @@ export async function GET() {
   const { data: orders, error } = await supabase
     .from('orders')
     .select(
-      'id, created_at, buyer_name, buyer_email, shipping_address, amount_cents, shipping_cents, status, tracking_code, drops(title, slug)'
+      // order_items replaced orders.drop_id (00007): one row per item, with the
+      // title and variant snapshotted at purchase time.
+      'id, created_at, buyer_name, buyer_email, shipping_address, amount_cents, total_cents, shipping_cents, status, tracking_code, order_items(title_snapshot, variant_snapshot, quantity)'
     )
     .eq('seller_id', user.id)
     .order('created_at', { ascending: false });
@@ -48,19 +50,25 @@ export async function GET() {
 
   const rows = (orders ?? []).map((o) => {
     const addr = (o.shipping_address ?? {}) as Record<string, string | null>;
-    const drop = Array.isArray(o.drops) ? o.drops[0] : o.drops;
+    const item = (o.order_items ?? [])
+      .map((i) => {
+        const label = i.variant_snapshot ? `${i.title_snapshot} (${i.variant_snapshot})` : i.title_snapshot;
+        return i.quantity > 1 ? `${label} x${i.quantity}` : label;
+      })
+      .join('; ');
     return [
       o.id,
       new Date(o.created_at).toISOString(),
-      drop?.title ?? '',
+      item,
       o.buyer_name,
       o.buyer_email,
       [addr.street1, addr.street2].filter(Boolean).join(' '),
       addr.city ?? '',
       addr.state ?? '',
       addr.zip ?? '',
-      (o.amount_cents / 100).toFixed(2),
-      (o.shipping_cents / 100).toFixed(2),
+      // total_cents is backfilled from amount_cents (00007); prefer it.
+      ((o.total_cents || o.amount_cents || 0) / 100).toFixed(2),
+      ((o.shipping_cents ?? 0) / 100).toFixed(2),
       o.status,
       o.tracking_code ?? '',
     ]

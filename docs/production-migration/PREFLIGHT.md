@@ -223,7 +223,8 @@ guarantee — thin evidence can never rise meaningfully above neutral, and a
 well-evidenced good performer (90/2,000 → 0.89) beats the fluke — holds.
 
 Adjacent findings from the audit (reported, per instruction NOT yet fixed):
-1. **REAL BUG, flagged for immediate follow-up — raw vs normalised
+1. **RESOLVED (commit d972847): viewer_profiles now stores the raw maps
+   and readers normalise at read time. Original finding: REAL BUG — raw vs normalised
    affinity persistence.** affinity-update.ts:222-232 upserts
    `result.profile` (the normalised, sum-to-1, capped maps) into
    viewer_profiles and feeds those same maps back as the next pass's input.

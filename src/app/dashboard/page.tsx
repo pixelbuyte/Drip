@@ -132,10 +132,10 @@ export default function DashboardPage() {
 
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           <a
-            href="/dashboard/drops"
+            href="/studio/videos"
             className="rounded-lg border border-gray-200 bg-white p-6 hover:border-blue-300 hover:shadow-sm"
           >
-            <h2 className="text-lg font-semibold text-gray-900">My Drops</h2>
+            <h2 className="text-lg font-semibold text-gray-900">My Videos</h2>
             <p className="mt-2 text-gray-600">Create and manage your video listings</p>
           </a>
 

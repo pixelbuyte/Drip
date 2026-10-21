@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { normalizeWithCap } from '@/lib/scoring/affinity';
 import type { ViewerContext, ViewerVideoPurchase } from '@/lib/scoring/candidates';
 import type { PriceBand, ViewerProfile } from '@/lib/scoring/types';
 import { loadViewerBlocks } from './blocks';
@@ -84,10 +85,15 @@ async function loadViewerProfile(db: SupabaseClient, anonId: string): Promise<Vi
   const row = data as ViewerProfileRow | null;
   if (!row) return EMPTY_PROFILE;
 
+  // viewer_profiles stores the affinity pass's RAW running state (event-weight
+  // scale, see affinity-update.ts), but the scoring core expects the
+  // normalised, capped maps (affinitySignal clamps each term at 1). Normalise
+  // here. normalizeWithCap is idempotent on an already-normalised map, so
+  // rows written before raw persistence read back unchanged.
   return {
-    categoryAffinity: toAffinityRecord(row.category_affinity),
-    sellerAffinity: toAffinityRecord(row.seller_affinity),
-    hashtagAffinity: toAffinityRecord(row.hashtag_affinity),
+    categoryAffinity: normalizeWithCap(toAffinityRecord(row.category_affinity)),
+    sellerAffinity: normalizeWithCap(toAffinityRecord(row.seller_affinity)),
+    hashtagAffinity: normalizeWithCap(toAffinityRecord(row.hashtag_affinity)),
     priceBand: toPriceBand(row.price_band),
     coldStartComplete: row.cold_start_complete === true,
   };

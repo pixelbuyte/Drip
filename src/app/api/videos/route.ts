@@ -11,8 +11,8 @@ import { createListingSchema, toStoredVariants, VIDEO_PASSTHROUGH_PREFIX } from 
  * direct-upload URL. The Mux webhook publishes the video (status 'live')
  * once the asset is ready, which is what puts it in the feed.
  *
- * Requires the 00006+ schema; the legacy `/api/drops` keeps serving the web
- * composer until the migration ships.
+ * Requires the 00006+ schema. It replaces the retired `/api/drops` (now 410)
+ * for both the iOS app and the web composer.
  *
  * Writes go through the caller's own session, so the owner RLS policies
  * (00007) still bind: every row is created as, and only as, this seller.
