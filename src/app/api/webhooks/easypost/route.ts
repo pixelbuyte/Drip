@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 
       const { data: order } = await supabase
         .from('orders')
-        .select('id, status, buyer_email, drop_id, seller_id')
+        .select('id, status, buyer_email, seller_id')
         .eq('tracking_code', event.result.tracking_code)
         .single();
 
@@ -69,15 +69,23 @@ export async function POST(request: NextRequest) {
         if (trackerStatus === 'delivered' && order.status !== 'delivered') {
           await supabase.from('orders').update({ status: 'delivered' }).eq('id', order.id);
 
-          const [{ data: drop }, { data: seller }] = await Promise.all([
-            supabase.from('drops').select('title').eq('id', order.drop_id).single(),
+          // The item title is snapshotted on order_items (00007), which
+          // replaced orders.drop_id and the drops table.
+          const [{ data: item }, { data: seller }] = await Promise.all([
+            supabase
+              .from('order_items')
+              .select('title_snapshot')
+              .eq('order_id', order.id)
+              .order('created_at', { ascending: true })
+              .limit(1)
+              .maybeSingle(),
             supabase.from('profiles').select('handle').eq('id', order.seller_id).single(),
           ]);
 
           if (order.buyer_email) {
             await sendBuyerDelivered(
               order.buyer_email,
-              drop?.title ?? 'Your order',
+              item?.title_snapshot ?? 'Your order',
               seller?.handle ?? 'seller'
             );
           }

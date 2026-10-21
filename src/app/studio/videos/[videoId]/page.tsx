@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { createServerClient_ } from '@/lib/supabase-server';
 import { createAdminClient } from '@/lib/supabase-admin';
+import { sharedVideoPath } from '@/lib/feed/shared-video';
 import {
   COUNTED_ORDER_STATUSES,
   FRESHNESS_HALF_LIFE_HOURS,
@@ -316,7 +317,7 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
   const peerIds = (peerVideos ?? []).map((v) => v.id);
   const productIds = [...new Set((links ?? []).map((l) => l.product_id))];
 
-  const [products, peerStats, categoryShipping, publicDrop] = await Promise.all([
+  const [products, peerStats, categoryShipping] = await Promise.all([
     productIds.length > 0
       ? safe<ProductRow[]>(
           supabase
@@ -341,12 +342,6 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
             .limit(500)
         )
       : Promise.resolve(null),
-    // The share link is only offered when a public page genuinely resolves.
-    // `/@handle/[slug]` reads the legacy `drops` table, so a product with no
-    // matching drop row has no public URL yet and gets an honest note instead.
-    safe<{ slug: string }[]>(
-      supabase.from('drops').select('slug').eq('seller_id', userId).eq('status', 'active')
-    ),
   ]);
 
   const productsById = new Map((products ?? []).map((p) => [p.id, p]));
@@ -398,15 +393,11 @@ async function loadReport(videoId: string): Promise<Report | null | 'missing'> {
     shared: sharedOpens ?? 0,
   };
 
+  // The share link is only offered when the public page genuinely resolves:
+  // /v/[videoId] serves live videos only, so anything else gets an honest note.
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? '';
-  const handle = await safe<{ handle: string | null }>(
-    supabase.from('profiles').select('handle').eq('id', userId).maybeSingle()
-  );
-  const publicSlugs = new Set((publicDrop ?? []).map((d) => d.slug));
   const shareUrl =
-    appUrl && handle?.handle && firstProduct?.slug && publicSlugs.has(firstProduct.slug)
-      ? `${appUrl}/@${handle.handle}/${firstProduct.slug}`
-      : null;
+    appUrl && video.status === 'live' ? `${appUrl}${sharedVideoPath(video.id)}` : null;
 
   return {
     video: {
